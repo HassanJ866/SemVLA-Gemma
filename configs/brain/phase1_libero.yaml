@@ -4,9 +4,7 @@
 run_name: brain_phase1_libero_lora
 
 # Model
-model_id: google/gemma-3-4b-it   # Gemma 4 4B instruction-tuned; verify HF availability at run time
-# Decision: using gemma-3-4b-it as the closest available Gemma 4 multimodal variant.
-# If google/gemma-4-4b or google/gemma-4e-4b becomes available, update this field.
+model_id: google/gemma-4-E4B-it   # Gemma 4 efficient 4B multimodal, instruction-tuned
 
 # LoRA
 use_lora: true

@@ -112,8 +112,18 @@ class InferenceChain:
         self.task_embed_dim = adapter_cfg.get("task_embed_dim", TASK_EMBED_DIM)
 
         # cache brain embedding table + tokenizer for task text encoding
-        self._embed_table = self.brain.model.get_input_embeddings()
-        self._tokenizer   = self.brain.processor.tokenizer
+        # vLLM exposes the model differently from HF; try both paths.
+        try:
+            self._embed_table = self.brain.model.get_input_embeddings()
+        except AttributeError:
+            # vLLM internal model — navigate to the underlying nn.Embedding
+            inner = self.brain.model
+            for attr in ("model", "language_model", "embed_tokens"):
+                if hasattr(inner, attr):
+                    inner = getattr(inner, attr)
+            self._embed_table = inner if isinstance(inner, torch.nn.Embedding) \
+                else self.brain.model
+        self._tokenizer = self.brain.processor.tokenizer
 
     # ── public ────────────────────────────────────────────────────────────
 
