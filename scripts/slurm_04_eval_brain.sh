@@ -15,7 +15,7 @@ set -euo pipefail
 
 module purge
 module load miniforge/24.3.0-0
-conda activate vlm
+conda activate semvla
 
 cd ~/SemVLA-Gemma
 
