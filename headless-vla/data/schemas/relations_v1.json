@@ -1,0 +1,16 @@
+{
+  "version": "v1",
+  "relations": [
+    "is_left_of",
+    "is_right_of",
+    "is_above",
+    "is_below",
+    "is_in_front_of",
+    "is_behind",
+    "is_on",
+    "is_under",
+    "is_inside",
+    "contains"
+  ],
+  "note": "All relations are bidirectional. Do not add new relations without retraining the annotator."
+}

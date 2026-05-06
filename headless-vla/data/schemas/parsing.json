@@ -1,0 +1,19 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "ParsingOutput",
+  "type": "object",
+  "required": ["triplets"],
+  "additionalProperties": false,
+  "properties": {
+    "triplets": {
+      "type": "array",
+      "description": "List of [subject, relation, object] spatial triplets",
+      "items": {
+        "type": "array",
+        "items": {"type": "string"},
+        "minItems": 3,
+        "maxItems": 3
+      }
+    }
+  }
+}

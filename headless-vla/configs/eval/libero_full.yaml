@@ -1,0 +1,18 @@
+# End-to-end evaluation: brain + franka adapter on LIBERO-Spatial
+
+brain_ckpt:   ckpts/brain_phase1/final
+adapter_ckpt: ckpts/franka_7dof/final
+action_stats: ckpts/franka_7dof/final/action_stats.json
+
+data_dir: data/libero_spatial_v5
+
+# Evaluation protocol
+n_trials:     10       # trials per task (10 tasks × 10 trials = 100 rollouts)
+max_steps:    300      # max env steps per trial
+
+# Inference settings
+n_flow_steps: 10
+cache_graph:  true
+cache_every:  5        # reuse scene graph for N control steps
+
+device: null           # null = auto-detect cuda

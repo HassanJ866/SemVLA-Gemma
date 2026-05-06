@@ -1,0 +1,49 @@
+# Brain Phase 1: fine-tuning on LIBERO-Spatial augmented data
+# Default: LoRA (r=32, alpha=64). Set use_lora=false for full fine-tune ablation.
+
+run_name: brain_phase1_libero_lora
+
+# Model
+model_id: google/gemma-3-4b-it   # Gemma 4 4B instruction-tuned; verify HF availability at run time
+# Decision: using gemma-3-4b-it as the closest available Gemma 4 multimodal variant.
+# If google/gemma-4-4b or google/gemma-4e-4b becomes available, update this field.
+
+# LoRA
+use_lora: true
+lora:
+  r: 32
+  alpha: 64
+  dropout: 0.05
+  target_modules:
+    - q_proj
+    - k_proj
+    - v_proj
+    - o_proj
+
+# Data
+train_jsonl: data/splits/libero_train.jsonl
+val_jsonl:   data/splits/libero_train_val.jsonl
+image_root:  data/images
+max_length:  1024
+
+# Optimiser
+peak_lr:      1.0e-4
+min_lr:       2.5e-6
+beta1:        0.9
+beta2:        0.95
+warmup_steps: 100
+max_steps:    50000
+
+# Training
+per_device_batch_size: 4
+grad_accum_steps:      16    # effective global batch = 64 (4 GPU × 4 × 4 accum)
+compile:               false
+
+# Logging & checkpointing
+log_steps:  100
+eval_steps: 2000
+save_steps: 5000
+output_dir: ckpts/brain_phase1
+
+# Experiment tracking (set to null to disable)
+wandb_project: headless-vla

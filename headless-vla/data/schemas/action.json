@@ -1,0 +1,25 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "SemanticActionOutput",
+  "type": "object",
+  "required": ["axis", "direction", "magnitude", "gripper"],
+  "additionalProperties": false,
+  "properties": {
+    "axis": {
+      "type": "string",
+      "enum": ["X", "Y", "Z"]
+    },
+    "direction": {
+      "type": "string",
+      "enum": ["positive", "negative"]
+    },
+    "magnitude": {
+      "type": "string",
+      "enum": ["small", "medium", "large"]
+    },
+    "gripper": {
+      "type": "string",
+      "enum": ["open", "close", "keep"]
+    }
+  }
+}

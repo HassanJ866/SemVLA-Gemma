@@ -1,0 +1,15 @@
+# Cross-embodiment evaluation stub
+# Train brain without arm C; train adapter on arm C only; test on arm C tasks.
+# This config is a placeholder for Phase 4 experiments (out of scope for Phase 1/2).
+
+brain_ckpt:   ckpts/brain_phase1/final
+adapter_ckpt: ckpts/widowx_6dof/final
+action_stats: ckpts/widowx_6dof/final/action_stats.json
+
+data_dir:     data/libero_spatial_v5   # update to arm-C dataset when available
+n_trials:     10
+max_steps:    300
+n_flow_steps: 10
+cache_graph:  true
+cache_every:  5
+device:       null
