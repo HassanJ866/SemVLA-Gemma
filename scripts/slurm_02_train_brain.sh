@@ -5,7 +5,7 @@
 #SBATCH --ntasks=1
 #SBATCH --cpus-per-task=8
 #SBATCH --mem=64G
-#SBATCH --time=2-00:00:00
+#SBATCH --time=0-23:59:00
 #SBATCH --mail-type=ALL
 #SBATCH --mail-user=s338920@studenti.polito.it
 #SBATCH --output=logs/slurm_%j_train_brain.out
