@@ -194,7 +194,7 @@ def process_demo(demo_key: str, demo: h5py.Group, instruction: str,
 
 def main():
     parser = argparse.ArgumentParser()
-    parser.add_argument("--data-dir", default="data/libero_spatial_v5")
+    parser.add_argument("--data-dir", default=os.path.expanduser("~/vlm_benchmarking/data/libero_spatial_v5"))
     parser.add_argument("--out", default="data/splits/libero_train.jsonl")
     parser.add_argument("--image-root", default="data/images")
     parser.add_argument("--val-frac", type=float, default=0.1,

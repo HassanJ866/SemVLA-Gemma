@@ -6,7 +6,7 @@ brain_ckpt:   ckpts/brain_phase1/final
 adapter_ckpt: ckpts/widowx_6dof/final
 action_stats: ckpts/widowx_6dof/final/action_stats.json
 
-data_dir:     data/libero_spatial_v5   # update to arm-C dataset when available
+data_dir:     ~/vlm_benchmarking/data/libero_spatial_v5   # update to arm-C dataset when available
 n_trials:     10
 max_steps:    300
 n_flow_steps: 10

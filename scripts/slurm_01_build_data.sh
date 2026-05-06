@@ -19,14 +19,19 @@ conda activate vlm
 
 cd ~/SemVLA-Gemma
 
+# HDF5 source lives in the sibling repo; all generated outputs stay in this repo
+DATA_DIR=~/vlm_benchmarking/data/libero_spatial_v5
+
 mkdir -p logs data/splits data/images
 
 echo "========================================================"
 echo "[$(date +'%H:%M:%S')] Building brain JSONL"
+echo "  Source : $DATA_DIR"
+echo "  Output : data/splits/  data/images/"
 echo "========================================================"
 
 python -m data.annotation.libero_build_graph \
-    --data-dir  data/libero_spatial_v5 \
+    --data-dir  "$DATA_DIR" \
     --out        data/splits/libero_train.jsonl \
     --image-root data/images \
     --val-frac   0.1 \
@@ -51,7 +56,7 @@ echo "[$(date +'%H:%M:%S')] Building adapter JSONL"
 echo "========================================================"
 
 python -m data.annotation.motion_primitive_label \
-    --data-dir  data/libero_spatial_v5 \
+    --data-dir  "$DATA_DIR" \
     --out        data/splits/adapter_franka.jsonl \
     --chunk-size 16 \
     --val-frac   0.1 \

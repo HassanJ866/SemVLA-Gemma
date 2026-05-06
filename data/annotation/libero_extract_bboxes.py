@@ -56,7 +56,7 @@ def extract_bboxes_from_hdf5(hdf5_path: Path) -> list[dict]:
 
 def main():
     parser = argparse.ArgumentParser()
-    parser.add_argument("--data-dir", default="data/libero_spatial_v5")
+    parser.add_argument("--data-dir", default=os.path.expanduser("~/vlm_benchmarking/data/libero_spatial_v5"))
     parser.add_argument("--out", default="data/splits/libero_bboxes.jsonl")
     args = parser.parse_args()
 

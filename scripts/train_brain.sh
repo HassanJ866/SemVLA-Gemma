@@ -6,7 +6,7 @@ set -euo pipefail
 # ── Step 0: build the 3-task JSONL from HDF5 ─────────────────────────────────
 echo "=== Building JSONL training data ==="
 python -m data.annotation.libero_build_graph \
-    --data-dir  data/libero_spatial_v5 \
+    --data-dir  ~/vlm_benchmarking/data/libero_spatial_v5 \
     --out        data/splits/libero_train.jsonl \
     --image-root data/images \
     --val-frac   0.1 \

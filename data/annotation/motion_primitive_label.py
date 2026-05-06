@@ -142,7 +142,7 @@ def process_demo(demo_key: str, demo: h5py.Group, instruction: str,
 
 def main():
     parser = argparse.ArgumentParser()
-    parser.add_argument("--data-dir", default="data/libero_spatial_v5")
+    parser.add_argument("--data-dir", default=os.path.expanduser("~/vlm_benchmarking/data/libero_spatial_v5"))
     parser.add_argument("--out", default="data/splits/adapter_franka.jsonl")
     parser.add_argument("--chunk-size", type=int, default=16)
     parser.add_argument("--val-frac", type=float, default=0.1)

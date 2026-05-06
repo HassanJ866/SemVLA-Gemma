@@ -4,7 +4,7 @@ brain_ckpt:   ckpts/brain_phase1/final
 adapter_ckpt: ckpts/franka_7dof/final
 action_stats: ckpts/franka_7dof/final/action_stats.json
 
-data_dir: data/libero_spatial_v5
+data_dir: ~/vlm_benchmarking/data/libero_spatial_v5
 
 # Evaluation protocol
 n_trials:     10       # trials per task (10 tasks × 10 trials = 100 rollouts)

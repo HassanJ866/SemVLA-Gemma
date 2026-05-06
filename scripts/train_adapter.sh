@@ -9,7 +9,7 @@ ARM=${1:-franka_7dof}
 # ── Step 0: extract motion-primitive windows ──────────────────────────────────
 echo "=== Labelling motion primitives for ${ARM} ==="
 python -m data.annotation.motion_primitive_label \
-    --data-dir  data/libero_spatial_v5 \
+    --data-dir  ~/vlm_benchmarking/data/libero_spatial_v5 \
     --out        data/splits/adapter_${ARM}.jsonl \
     --chunk-size 16 \
     --val-frac   0.1 \
