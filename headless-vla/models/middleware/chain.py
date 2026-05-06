@@ -2,11 +2,11 @@
 5-step inference chain (middleware).
 
 Implements the full per-control-step decision pipeline:
-  Step 1  GROUNDING  — brain LLM call
-  Step 2  PARSING    — brain LLM call
-  Step 3  SEMANTIC ACTION — brain LLM call
-  Step 4  MIDDLEWARE  — deterministic Python (this module)
-  Step 5  ADAPTER    — small NN forward pass
+  Step 1  GROUNDING      — brain LLM call: image + instruction → target bbox
+  Step 2  PARSING        — brain LLM call: image + bboxes → scene graph
+  Step 3  TASK SYNTHESIS — brain LLM call: image + src/dst bboxes + local graph → task string
+  Step 4  MIDDLEWARE     — encode task string → task_emb; encode graph → graph tensor
+  Step 5  ADAPTER        — flow matching inference → denormalised action chunk
 
 Usage:
     from models.middleware.chain import InferenceChain
@@ -25,14 +25,34 @@ import numpy as np
 import torch
 from PIL import Image
 
-from models.middleware.enums import semantic_action_to_ids, SAFE_STOP_IDS
 from models.middleware.graph_encoder import encode_graph_tensor, GRAPH_FEAT_DIM
 from models.middleware.normalize import ActionNormalizer
 
 log = logging.getLogger(__name__)
 
 
+TASK_EMBED_DIM = 384  # mean-pooled Gemma token embedding dimension
 SAFE_STOP_ACTION = np.zeros(7, dtype=np.float32)  # zero delta = stay in place
+
+
+def encode_task_text(text: str, tokenizer, embed_table: torch.Tensor,
+                     device: str = "cpu") -> torch.Tensor:
+    """
+    Encode a task string to a 384-dim float vector via mean-pooled Gemma token embeddings.
+    Uses the frozen brain's own embedding table — no extra model required.
+
+    Returns tensor of shape [1, TASK_EMBED_DIM].
+    """
+    tokens = tokenizer(text, return_tensors="pt", truncation=True, max_length=64)
+    input_ids = tokens["input_ids"][0]  # [L]
+    with torch.no_grad():
+        embs = embed_table(input_ids.to(embed_table.weight.device))  # [L, vocab_emb_dim]
+        pooled = embs.mean(dim=0)  # [vocab_emb_dim]
+        # project to TASK_EMBED_DIM if vocab embedding dim differs
+        if pooled.shape[0] != TASK_EMBED_DIM:
+            pooled = pooled[:TASK_EMBED_DIM] if pooled.shape[0] > TASK_EMBED_DIM else \
+                     torch.nn.functional.pad(pooled, (0, TASK_EMBED_DIM - pooled.shape[0]))
+    return pooled.to(device).unsqueeze(0)  # [1, TASK_EMBED_DIM]
 
 
 class InferenceChain:
@@ -86,9 +106,14 @@ class InferenceChain:
         self.adapter.load_state_dict(state_dict)
         self.adapter.eval()
 
-        self.action_dim  = adapter_cfg["action_dim"]
-        self.chunk_size  = adapter_cfg.get("chunk_size", 16)
+        self.action_dim     = adapter_cfg["action_dim"]
+        self.chunk_size     = adapter_cfg.get("chunk_size", 16)
         self.graph_feat_dim = adapter_cfg.get("graph_feat_dim", GRAPH_FEAT_DIM)
+        self.task_embed_dim = adapter_cfg.get("task_embed_dim", TASK_EMBED_DIM)
+
+        # cache brain embedding table + tokenizer for task text encoding
+        self._embed_table = self.brain.model.get_input_embeddings()
+        self._tokenizer   = self.brain.processor.tokenizer
 
     # ── public ────────────────────────────────────────────────────────────
 
@@ -134,16 +159,40 @@ class InferenceChain:
             if self.cache_graph:
                 self._cached_graph = scene_graph
 
-        # Step 3 — SEMANTIC ACTION
         proprio_list = proprio.tolist() if isinstance(proprio, np.ndarray) else list(proprio)
-        sem_action = self.brain.semantic_action(instruction, scene_graph, proprio_list)
 
-        # Step 4 — MIDDLEWARE: validate + encode
-        self._validate_schema(sem_action, ["axis", "direction", "magnitude", "gripper"])
-        semantic_ids = semantic_action_to_ids(sem_action)
+        # Step 3 — TASK SYNTHESIS
+        # Use the grounding output to identify source object + build its local graph.
+        src_name  = grounding.get("object", "")
+        src_bbox  = grounding.get("bbox", [0, 0, 0, 0])
+        triplets  = scene_graph.get("triplets", [])
+        src_graph = [t for t in triplets if len(t) == 3 and t[0] == src_name]
+
+        # Destination: pick the first object in the scene graph that isn't the source.
+        # At runtime the instruction disambiguates; this is a best-effort heuristic.
+        dst_name = src_name
+        dst_bbox = src_bbox
+        bboxes_in_graph = list({t[0] for t in triplets if len(t) == 3} |
+                               {t[2] for t in triplets if len(t) == 3})
+        for candidate in bboxes_in_graph:
+            if candidate != src_name:
+                dst_name = candidate
+                dst_bbox = [0, 0, 0, 0]  # no bbox for dst at runtime; brain uses visual context
+                break
+
+        task_result = self.brain.synthesize_task(
+            image, src_name, src_bbox, dst_name, dst_bbox, src_graph
+        )
+        self._validate_schema(task_result, ["task"])
+        task_text = task_result["task"]
+
+        # Step 4 — MIDDLEWARE: encode task text + graph
+        task_emb_tensor = encode_task_text(
+            task_text, self._tokenizer, self._embed_table, device=self.device
+        )  # [1, task_embed_dim]
 
         graph_tensor = encode_graph_tensor(
-            scene_graph.get("triplets", []),
+            triplets,
             dim=self.graph_feat_dim,
             device=self.device,
         )  # [1, 1, G]
@@ -152,15 +201,11 @@ class InferenceChain:
             proprio_list, dtype=torch.float32, device=self.device
         ).unsqueeze(0)  # [1, state_dim]
 
-        ids_tensor = torch.tensor(
-            [semantic_ids], dtype=torch.long, device=self.device
-        )  # [1, 4]
-
         # Step 5 — ADAPTER: flow matching inference
         from models.adapter.flow_matching import flow_matching_inference
         with torch.no_grad():
             normed_chunk = flow_matching_inference(
-                self.adapter, ids_tensor, graph_tensor, state_tensor,
+                self.adapter, task_emb_tensor, graph_tensor, state_tensor,
                 self.chunk_size, self.action_dim, self.n_flow_steps, self.device
             )  # [1, T, A]
 

@@ -12,10 +12,9 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 from models.brain.prompts import (
     grounding_prompt,
     parsing_prompt,
-    action_prompt,
+    task_synthesis_prompt,
     format_training_sample,
 )
-from models.middleware.enums import semantic_action_to_ids, ids_to_semantic_action
 
 
 def test_grounding_prompt_structure():
@@ -35,13 +34,18 @@ def test_parsing_prompt_structure():
     assert "triplets" in msgs[1]["content"]
 
 
-def test_action_prompt_structure():
-    sg = {"triplets": [["bowl", "is_on", "plate"]]}
-    msgs = action_prompt("pick up the bowl", sg,
-                         [0.1, 0.2, 0.3, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0])
+def test_task_synthesis_prompt_structure():
+    src_graph = [["akita_black_bowl_1", "is_on_top_of", "glazed_rim_porcelain_ramekin_1"]]
+    msgs = task_synthesis_prompt(
+        "akita_black_bowl_1", [94, 47, 128, 78],
+        "plate_1", [79, 13, 116, 48],
+        src_graph,
+    )
     assert msgs[1]["role"] == "user"
-    assert "axis" in msgs[1]["content"]
-    assert "gripper" in msgs[1]["content"]
+    assert "<image>" in msgs[1]["content"]
+    assert "akita_black_bowl_1" in msgs[1]["content"]
+    assert "plate_1" in msgs[1]["content"]
+    assert "task" in msgs[1]["content"]
 
 
 def test_format_grounding_sample():
@@ -63,7 +67,7 @@ def test_format_parsing_sample():
         "task_type": "parsing",
         "image": "test/frame.png",
         "bboxes": [{"name": "bowl", "bbox": [10, 20, 50, 60]}],
-        "output": '{"triplets": [["bowl", "is_on", "plate"]]}',
+        "output": '{"triplets": [["bowl", "is_on_top_of", "plate"]]}',
     }
     out = format_training_sample(rec)
     target = json.loads(out["target"])
@@ -71,50 +75,69 @@ def test_format_parsing_sample():
     assert len(target["triplets"]) == 1
 
 
-def test_format_action_sample():
+def test_format_task_synthesis_sample():
     rec = {
-        "task_type": "action",
-        "instruction": "pick up the bowl",
-        "scene_graph": {"triplets": []},
-        "proprio": [0.0] * 9,
-        "output": '{"axis": "Z", "direction": "negative", "magnitude": "small", "gripper": "keep"}',
+        "task_type": "task_synthesis",
+        "image": "test/frame.png",
+        "src_name": "akita_black_bowl_2",
+        "src_bbox": [94, 47, 128, 78],
+        "dst_name": "plate_1",
+        "dst_bbox": [79, 13, 116, 48],
+        "src_graph": [["akita_black_bowl_2", "is_on_top_of", "glazed_rim_porcelain_ramekin_1"]],
+        "output": '{"task": "pick up the black bowl and place it on the plate"}',
     }
     out = format_training_sample(rec)
+    assert "messages" in out and "target" in out
     target = json.loads(out["target"])
-    assert target["axis"] == "Z"
-    assert target["gripper"] == "keep"
+    assert "task" in target
+    assert isinstance(target["task"], str)
+    assert len(target["task"]) > 0
 
 
-def test_enum_roundtrip():
-    actions = [
-        {"axis": "X", "direction": "positive",  "magnitude": "small",  "gripper": "open"},
-        {"axis": "Y", "direction": "negative",  "magnitude": "medium", "gripper": "close"},
-        {"axis": "Z", "direction": "positive",  "magnitude": "large",  "gripper": "keep"},
+def test_task_synthesis_output_json_validity():
+    valid_outputs = [
+        '{"task": "pick up the black bowl and place it on the plate"}',
+        '{"task": "pick up the black bowl and place it on the ramekin"}',
+        '{"task": "pick up the cookie box and place it on the stove"}',
+        '{"task": "pick up the ramekin and place it on the plate"}',
     ]
-    for action in actions:
-        ids = semantic_action_to_ids(action)
-        assert len(ids) == 4
-        recovered = ids_to_semantic_action(ids)
-        assert recovered == action, f"Roundtrip failed: {action} -> {ids} -> {recovered}"
+    for s in valid_outputs:
+        obj = json.loads(s)
+        assert isinstance(obj, dict)
+        assert "task" in obj
+        assert isinstance(obj["task"], str)
 
 
 def test_json_output_validity():
     for s in [
         '{"object": "bowl", "bbox": [10, 20, 50, 60]}',
-        '{"triplets": [["bowl", "is_on", "plate"], ["plate", "is_under", "bowl"]]}',
-        '{"axis": "X", "direction": "positive", "magnitude": "small", "gripper": "keep"}',
+        '{"triplets": [["bowl", "is_on_top_of", "plate"], ["plate", "is_below_of", "bowl"]]}',
+        '{"task": "pick up the black bowl on the ramekin and place it on the plate"}',
     ]:
         obj = json.loads(s)
         assert isinstance(obj, dict)
 
 
+def test_unknown_task_type_raises():
+    rec = {
+        "task_type": "invalid_task",
+        "output": "{}",
+    }
+    try:
+        format_training_sample(rec)
+        assert False, "Should have raised ValueError"
+    except ValueError:
+        pass
+
+
 if __name__ == "__main__":
     test_grounding_prompt_structure()
     test_parsing_prompt_structure()
-    test_action_prompt_structure()
+    test_task_synthesis_prompt_structure()
     test_format_grounding_sample()
     test_format_parsing_sample()
-    test_format_action_sample()
-    test_enum_roundtrip()
+    test_format_task_synthesis_sample()
+    test_task_synthesis_output_json_validity()
     test_json_output_validity()
+    test_unknown_task_type_raises()
     print("All chain/JSONL tests passed.")

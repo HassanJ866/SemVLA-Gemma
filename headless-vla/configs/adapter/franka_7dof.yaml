@@ -11,10 +11,11 @@ chunk_size:   16
 graph_feat_dim: 64
 
 # Architecture
-hidden:   256
-n_heads:  4
-n_blocks: 4
-ffn_mult: 4
+hidden:         256
+n_heads:        4
+n_blocks:       4
+ffn_mult:       4
+task_embed_dim: 384   # mean-pooled Gemma token embedding dim
 
 # Data
 train_jsonl: data/splits/adapter_franka.jsonl

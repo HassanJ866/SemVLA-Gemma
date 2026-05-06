@@ -34,7 +34,7 @@ def sample_beta_tau(batch_size: int, alpha: float = 1.5, beta: float = 1.0,
 
 def flow_matching_loss(
     adapter,
-    semantic_ids: Tensor,   # [B, 4]
+    task_emb: Tensor,        # [B, task_embed_dim]
     graph: Tensor,           # [B, K, G]
     state: Tensor,           # [B, state_dim]
     action_chunk: Tensor,    # [B, T, A]  normalised clean actions
@@ -54,7 +54,7 @@ def flow_matching_loss(
     target_velocity = eps - action_chunk                               # [B, T, A]
 
     v_pred = adapter(
-        semantic_ids=semantic_ids,
+        task_emb=task_emb,
         graph=graph,
         state=state,
         noisy_actions=A_noisy,
@@ -68,7 +68,7 @@ def flow_matching_loss(
 @torch.no_grad()
 def flow_matching_inference(
     adapter,
-    semantic_ids: Tensor,   # [B, 4]
+    task_emb: Tensor,        # [B, task_embed_dim]
     graph: Tensor,           # [B, K, G]
     state: Tensor,           # [B, state_dim]
     chunk_size: int,
@@ -80,13 +80,13 @@ def flow_matching_inference(
     Euler integration from tau=0 (noise) to tau=1 (clean).
     Returns predicted action chunk [B, chunk_size, action_dim].
     """
-    B = semantic_ids.shape[0]
+    B = task_emb.shape[0]
     A = torch.randn(B, chunk_size, action_dim, device=device)
 
     for k in range(n_steps):
         tau = torch.full((B,), k / n_steps, dtype=torch.float32, device=device)
         v = adapter(
-            semantic_ids=semantic_ids,
+            task_emb=task_emb,
             graph=graph,
             state=state,
             noisy_actions=A,

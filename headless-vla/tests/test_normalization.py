@@ -22,7 +22,8 @@ def _write_dummy_jsonl(path: Path, n_records: int = 50, action_dim: int = 7,
         for _ in range(n_records):
             chunk = rng.uniform(-0.05, 0.05, (chunk_size, action_dim)).tolist()
             record = {
-                "semantic_ids": [0, 3, 5, 8],
+                "task_emb": [0.0] * 384,
+                "task_text": "pick up the bowl",
                 "graph_feats": [0.0] * 64,
                 "proprio": [0.0] * 9,
                 "action_chunk": chunk,

@@ -32,19 +32,22 @@ def _make_adapter(action_dim=7, chunk_size=4, hidden=32, n_heads=2,
     )
 
 
+TASK_EMBED_DIM = 384
+
+
 def _make_batch(B=2, chunk_size=4, action_dim=7, graph_feat_dim=16, state_dim=9):
-    sem_ids = torch.tensor([[0, 3, 5, 8], [2, 4, 7, 10]], dtype=torch.long)[:B]
-    graph   = torch.randn(B, 1, graph_feat_dim)
-    state   = torch.randn(B, state_dim)
-    actions = torch.randn(B, chunk_size, action_dim)
-    tau     = torch.rand(B)
-    return sem_ids, graph, state, actions, tau
+    task_emb = torch.randn(B, TASK_EMBED_DIM)
+    graph    = torch.randn(B, 1, graph_feat_dim)
+    state    = torch.randn(B, state_dim)
+    actions  = torch.randn(B, chunk_size, action_dim)
+    tau      = torch.rand(B)
+    return task_emb, graph, state, actions, tau
 
 
 def test_adapter_forward_shape():
     adapter = _make_adapter()
-    sem_ids, graph, state, actions, tau = _make_batch()
-    out = adapter(sem_ids, graph, state, actions, tau)
+    task_emb, graph, state, actions, tau = _make_batch()
+    out = adapter(task_emb, graph, state, actions, tau)
     assert out.shape == (2, 4, 7), f"Expected (2,4,7), got {out.shape}"
 
 
@@ -73,8 +76,8 @@ def test_causal_self_attn_block():
 
 def test_flow_matching_loss_scalar():
     adapter = _make_adapter()
-    sem_ids, graph, state, actions, _ = _make_batch()
-    loss = flow_matching_loss(adapter, sem_ids, graph, state, actions)
+    task_emb, graph, state, actions, _ = _make_batch()
+    loss = flow_matching_loss(adapter, task_emb, graph, state, actions)
     assert loss.ndim == 0  # scalar
     assert not torch.isnan(loss)
     assert loss.item() > 0
@@ -82,8 +85,8 @@ def test_flow_matching_loss_scalar():
 
 def test_flow_matching_loss_backward():
     adapter = _make_adapter()
-    sem_ids, graph, state, actions, _ = _make_batch()
-    loss = flow_matching_loss(adapter, sem_ids, graph, state, actions)
+    task_emb, graph, state, actions, _ = _make_batch()
+    loss = flow_matching_loss(adapter, task_emb, graph, state, actions)
     loss.backward()
     grad_norms = [p.grad.norm().item() for p in adapter.parameters()
                   if p.grad is not None]
@@ -93,9 +96,9 @@ def test_flow_matching_loss_backward():
 
 def test_flow_matching_inference_shape():
     adapter = _make_adapter()
-    sem_ids, graph, state, _, _ = _make_batch(B=2)
+    task_emb, graph, state, _, _ = _make_batch(B=2)
     with torch.no_grad():
-        chunk = flow_matching_inference(adapter, sem_ids, graph, state,
+        chunk = flow_matching_inference(adapter, task_emb, graph, state,
                                         chunk_size=4, action_dim=7, n_steps=5)
     assert chunk.shape == (2, 4, 7)
     assert not torch.isnan(chunk).any()
@@ -121,9 +124,9 @@ def test_adapter_save_load(tmp_path):
     # reload
     loaded = SemanticActionAdapter(**cfg)
     loaded.load_state_dict(torch.load(tmp_path / "adapter.pt", weights_only=True))
-    sem_ids, graph, state, actions, tau = _make_batch()
+    task_emb, graph, state, actions, tau = _make_batch()
     with torch.no_grad():
-        out = loaded(sem_ids, graph, state, actions, tau)
+        out = loaded(task_emb, graph, state, actions, tau)
     assert out.shape == (2, 4, 7)
 
 

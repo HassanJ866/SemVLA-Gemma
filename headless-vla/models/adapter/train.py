@@ -56,7 +56,7 @@ class AdapterDataset(Dataset):
     def __getitem__(self, idx):
         rec = self.records[idx]
 
-        semantic_ids = torch.tensor(rec["semantic_ids"], dtype=torch.long)  # [4]
+        task_emb = torch.tensor(rec["task_emb"], dtype=torch.float32)  # [task_embed_dim]
 
         graph_feats = np.array(rec["graph_feats"], dtype=np.float32)
         if len(graph_feats) < self.graph_feat_dim:
@@ -81,7 +81,7 @@ class AdapterDataset(Dataset):
         action_chunk = torch.tensor(chunk_norm, dtype=torch.float32)  # [T, A]
 
         return {
-            "semantic_ids": semantic_ids,
+            "task_emb":     task_emb,
             "graph_feats":  graph_feats,
             "state":        state,
             "action_chunk": action_chunk,
@@ -90,7 +90,7 @@ class AdapterDataset(Dataset):
 
 def collate(batch):
     return {
-        "semantic_ids": torch.stack([b["semantic_ids"] for b in batch]),   # [B, 4]
+        "task_emb":     torch.stack([b["task_emb"]     for b in batch]),   # [B, E]
         "graph_feats":  torch.stack([b["graph_feats"]  for b in batch]),   # [B, 1, G]
         "state":        torch.stack([b["state"]        for b in batch]),   # [B, S]
         "action_chunk": torch.stack([b["action_chunk"] for b in batch]),   # [B, T, A]
@@ -106,7 +106,7 @@ def evaluate_loss(adapter, val_loader, device) -> float:
         for batch in val_loader:
             loss = flow_matching_loss(
                 adapter,
-                batch["semantic_ids"].to(device),
+                batch["task_emb"].to(device),
                 batch["graph_feats"].to(device),
                 batch["state"].to(device),
                 batch["action_chunk"].to(device),
@@ -147,6 +147,7 @@ def main(cfg: DictConfig):
         n_blocks=cfg.n_blocks,
         graph_feat_dim=cfg.graph_feat_dim,
         state_dim=cfg.state_dim,
+        task_embed_dim=cfg.get("task_embed_dim", 384),
     ).to(device)
     n_params = sum(p.numel() for p in adapter.parameters() if p.requires_grad)
     log.info(f"Adapter parameters: {n_params:,}")
@@ -182,7 +183,7 @@ def main(cfg: DictConfig):
 
             loss = flow_matching_loss(
                 adapter,
-                batch["semantic_ids"].to(device),
+                batch["task_emb"].to(device),
                 batch["graph_feats"].to(device),
                 batch["state"].to(device),
                 batch["action_chunk"].to(device),

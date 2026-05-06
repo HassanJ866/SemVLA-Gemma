@@ -25,7 +25,7 @@ device       = sys.argv[4] if len(sys.argv) > 4 else "cuda"
 from models.brain.infer import BrainInference
 from models.adapter.architecture import SemanticActionAdapter
 from models.adapter.flow_matching import flow_matching_inference
-from models.middleware.enums import semantic_action_to_ids
+from models.middleware.chain import encode_task_text
 from models.middleware.graph_encoder import encode_graph_tensor
 from models.middleware.normalize import ActionNormalizer
 
@@ -41,9 +41,10 @@ adapter.eval()
 dummy_image  = Image.new("RGB", (128, 128), (120, 100, 80))
 instruction  = "pick up the black bowl and place it on the plate"
 proprio      = np.zeros(9, dtype=np.float32)
-sem_ids_t    = torch.tensor([[0, 3, 5, 8]], dtype=torch.long, device=device)
 graph_t      = encode_graph_tensor([], device=device)
 state_t      = torch.zeros(1, 9, device=device)
+embed_table  = brain.model.get_input_embeddings()
+tokenizer    = brain.processor.tokenizer
 
 n_warmup = 5
 n_iters  = 50
@@ -52,26 +53,33 @@ n_iters  = 50
 for _ in range(n_warmup):
     brain.ground(dummy_image, instruction)
 
-times = {"grounding": [], "parsing": [], "action": [], "adapter": [], "total": []}
+times = {"grounding": [], "parsing": [], "synthesis": [], "adapter": [], "total": []}
 for _ in range(n_iters):
     t0 = time.perf_counter()
     grounding = brain.ground(dummy_image, instruction)
     t1 = time.perf_counter()
     scene_graph = brain.parse(dummy_image, [])
     t2 = time.perf_counter()
-    sem_action = brain.semantic_action(instruction, scene_graph, proprio.tolist())
+    src_name = grounding.get("object", "")
+    src_bbox = grounding.get("bbox", [0, 0, 0, 0])
+    src_graph = [tr for tr in scene_graph.get("triplets", [])
+                 if len(tr) == 3 and tr[0] == src_name]
+    task_result = brain.synthesize_task(
+        dummy_image, src_name, src_bbox, src_name, src_bbox, src_graph
+    )
+    task_emb_t = encode_task_text(
+        task_result.get("task", instruction), tokenizer, embed_table, device=device
+    )
     t3 = time.perf_counter()
-    sem_ids_t = torch.tensor([semantic_action_to_ids(sem_action)],
-                              dtype=torch.long, device=device)
     with torch.no_grad():
-        chunk = flow_matching_inference(adapter, sem_ids_t, graph_t, state_t,
+        chunk = flow_matching_inference(adapter, task_emb_t, graph_t, state_t,
                                         cfg["chunk_size"], cfg["action_dim"],
                                         n_steps=10, device=device)
     t4 = time.perf_counter()
 
     times["grounding"].append((t1-t0)*1000)
     times["parsing"].append((t2-t1)*1000)
-    times["action"].append((t3-t2)*1000)
+    times["synthesis"].append((t3-t2)*1000)
     times["adapter"].append((t4-t3)*1000)
     times["total"].append((t4-t0)*1000)
 

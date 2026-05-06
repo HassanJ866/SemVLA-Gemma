@@ -79,8 +79,8 @@ def evaluate(ckpt: str, val_jsonl: str, image_root: str, n_samples: int | None):
     ious = []
     graph_f1s = []
     per_rel: dict[str, dict] = defaultdict(lambda: {"tp": 0, "fp": 0, "fn": 0})
-    action_correct = 0
-    action_total = 0
+    synthesis_correct = 0
+    synthesis_total = 0
 
     for rec in records:
         task = rec["task_type"]
@@ -128,20 +128,18 @@ def evaluate(ckpt: str, val_jsonl: str, image_root: str, n_samples: int | None):
                         per_rel[rel]["tp"] += 1
                         per_rel[rel]["fp"] -= 1
 
-            elif task == "action":
-                pred = brain.semantic_action(
-                    rec["instruction"],
-                    rec.get("scene_graph", {"triplets": []}),
-                    rec.get("proprio", []),
+            elif task == "task_synthesis":
+                pred = brain.synthesize_task(
+                    image,
+                    rec["src_name"], rec["src_bbox"],
+                    rec["dst_name"], rec["dst_bbox"],
+                    rec.get("src_graph", []),
                 )
-                assert all(k in pred for k in ("axis", "direction", "magnitude", "gripper"))
+                assert "task" in pred and isinstance(pred["task"], str)
                 validity[task][0] += 1
-                action_total += 1
-                if (pred["axis"] == gt["axis"]
-                        and pred["direction"] == gt["direction"]
-                        and pred["magnitude"] == gt["magnitude"]
-                        and pred["gripper"] == gt["gripper"]):
-                    action_correct += 1
+                synthesis_total += 1
+                if pred["task"].strip().lower() == gt["task"].strip().lower():
+                    synthesis_correct += 1
 
         except Exception as e:
             log.warning(f"Sample failed ({task}): {e}")
@@ -152,8 +150,8 @@ def evaluate(ckpt: str, val_jsonl: str, image_root: str, n_samples: int | None):
     report["grounding/iou_mean"]   = float(np.mean(ious))   if ious else 0.0
     report["grounding/iou_median"] = float(np.median(ious)) if ious else 0.0
     report["parsing/graph_f1"]     = float(np.mean(graph_f1s)) if graph_f1s else 0.0
-    if action_total:
-        report["action/exact_match"] = action_correct / action_total
+    if synthesis_total:
+        report["task_synthesis/exact_match"] = synthesis_correct / synthesis_total
 
     for rel, counts in per_rel.items():
         tp = max(counts["tp"], 0)

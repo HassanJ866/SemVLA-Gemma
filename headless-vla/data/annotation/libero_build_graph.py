@@ -39,49 +39,26 @@ import numpy as np
 
 # ── object vocabulary ─────────────────────────────────────────────────────────
 
-OBJ_NAMES = {
-    "akita_black_bowl_1":               "the black bowl",
-    "akita_black_bowl_2":               "the second black bowl",
-    "cookies_1":                        "the cookie box",
-    "glazed_rim_porcelain_ramekin_1":   "the ramekin",
-    "plate_1":                          "the plate",
-    "wooden_cabinet_1":                 "the wooden cabinet",
-    "flat_stove_1":                     "the stove",
-}
-
-# Objects that can be physically picked up (not large fixtures)
-MOVABLE_OBJECTS = [
-    "akita_black_bowl_1",
-    "akita_black_bowl_2",
-    "cookies_1",
-    "glazed_rim_porcelain_ramekin_1",
+# Hardcoded (src, dst, task_string) triples for task synthesis.
+# Both bowl objects map to "the black bowl" — no "second black bowl" ambiguity.
+# Destinations cover all physically sensible placements for each movable object.
+TASK_STRINGS = [
+    ("akita_black_bowl_1", "plate_1",                        "pick up the black bowl and place it on the plate"),
+    ("akita_black_bowl_1", "flat_stove_1",                   "pick up the black bowl and place it on the stove"),
+    ("akita_black_bowl_1", "cookies_1",                      "pick up the black bowl and place it on the cookie box"),
+    ("akita_black_bowl_1", "glazed_rim_porcelain_ramekin_1", "pick up the black bowl and place it on the ramekin"),
+    ("akita_black_bowl_1", "wooden_cabinet_1",               "pick up the black bowl and place it on the wooden cabinet"),
+    ("akita_black_bowl_2", "plate_1",                        "pick up the black bowl and place it on the plate"),
+    ("akita_black_bowl_2", "flat_stove_1",                   "pick up the black bowl and place it on the stove"),
+    ("akita_black_bowl_2", "cookies_1",                      "pick up the black bowl and place it on the cookie box"),
+    ("akita_black_bowl_2", "glazed_rim_porcelain_ramekin_1", "pick up the black bowl and place it on the ramekin"),
+    ("akita_black_bowl_2", "wooden_cabinet_1",               "pick up the black bowl and place it on the wooden cabinet"),
+    ("cookies_1",          "plate_1",                        "pick up the cookie box and place it on the plate"),
+    ("cookies_1",          "flat_stove_1",                   "pick up the cookie box and place it on the stove"),
+    ("cookies_1",          "wooden_cabinet_1",               "pick up the cookie box and place it on the wooden cabinet"),
+    ("glazed_rim_porcelain_ramekin_1", "plate_1",            "pick up the ramekin and place it on the plate"),
+    ("glazed_rim_porcelain_ramekin_1", "flat_stove_1",       "pick up the ramekin and place it on the stove"),
 ]
-
-# Valid destination objects for each movable source
-VALID_DESTINATIONS = {
-    "akita_black_bowl_1":             ["plate_1", "cookies_1", "glazed_rim_porcelain_ramekin_1",
-                                       "flat_stove_1", "wooden_cabinet_1"],
-    "akita_black_bowl_2":             ["plate_1", "cookies_1", "glazed_rim_porcelain_ramekin_1",
-                                       "flat_stove_1", "wooden_cabinet_1"],
-    "cookies_1":                      ["plate_1", "flat_stove_1", "wooden_cabinet_1"],
-    "glazed_rim_porcelain_ramekin_1": ["plate_1", "flat_stove_1"],
-}
-
-# Relation priority for selecting the most salient spatial descriptor
-REL_PRIORITY = [
-    "is_on_top_of", "is_inside", "is_in_front_of",
-    "is_left_of", "is_right_of", "is_behind", "is_below_of",
-]
-
-REL_TEMPLATE = {
-    "is_on_top_of":   "on the {ref}",
-    "is_inside":      "inside the {ref}",
-    "is_in_front_of": "in front of the {ref}",
-    "is_left_of":     "next to the {ref}",
-    "is_right_of":    "next to the {ref}",
-    "is_behind":      "behind the {ref}",
-    "is_below_of":    "below the {ref}",
-}
 
 
 # ── helpers ────────────────────────────────────────────────────────────────────
@@ -128,58 +105,23 @@ def _pick_target_object(instruction: str, bboxes: dict) -> tuple[str, list[int]]
     return best_name, bboxes[best_name]
 
 
-def _pick_relation_descriptor(src_triplets: list, src_name: str) -> str:
-    """
-    Return a spatial descriptor phrase for the source object based on its
-    most salient relation to a neighbour, e.g. "on the ramekin".
-    Falls back to empty string if no useful relation is found.
-    """
-    # Build map: relation → list of object names
-    rel_map: dict[str, list[str]] = {}
-    for triplet in src_triplets:
-        if len(triplet) != 3:
-            continue
-        s, r, o = triplet
-        if s == src_name and r in REL_TEMPLATE:
-            rel_map.setdefault(r, []).append(o)
-
-    for rel in REL_PRIORITY:
-        if rel in rel_map:
-            ref_obj = rel_map[rel][0]
-            ref_human = OBJ_NAMES.get(ref_obj, ref_obj.replace("_", " "))
-            return REL_TEMPLATE[rel].format(ref=ref_human)
-    return ""
-
-
 def _generate_task_synthesis_record(
-    src_name: str, dst_name: str,
+    src_name: str, dst_name: str, task_str: str,
     bboxes_step: dict, sg_triplets: list, img_rel: str,
 ) -> dict | None:
-    """Build one task_synthesis JSONL record for a (src, dst) pair at this frame."""
+    """Build one task_synthesis JSONL record for a hardcoded (src, dst, task_str) triple."""
     if src_name not in bboxes_step or dst_name not in bboxes_step:
         return None
 
-    src_bbox = bboxes_step[src_name]
-    dst_bbox = bboxes_step[dst_name]
-
     src_graph = [t for t in sg_triplets if len(t) == 3 and t[0] == src_name]
-
-    descriptor = _pick_relation_descriptor(src_graph, src_name)
-    src_human = OBJ_NAMES.get(src_name, src_name.replace("_", " "))
-    dst_human = OBJ_NAMES.get(dst_name, dst_name.replace("_", " "))
-
-    if descriptor:
-        task_str = f"pick up {src_human} {descriptor} and place it on {dst_human}"
-    else:
-        task_str = f"pick up {src_human} and place it on {dst_human}"
 
     return {
         "task_type": "task_synthesis",
         "image": img_rel,
         "src_name": src_name,
-        "src_bbox": src_bbox,
+        "src_bbox": bboxes_step[src_name],
         "dst_name": dst_name,
-        "dst_bbox": dst_bbox,
+        "dst_bbox": bboxes_step[dst_name],
         "src_graph": src_graph,
         "output": json.dumps({"task": task_str}),
     }
@@ -230,17 +172,17 @@ def process_demo(demo_key: str, demo: h5py.Group, instruction: str,
                 "output": json.dumps({"triplets": sg_triplets}),
             })
 
-        # ── Task 3: task synthesis (1 random valid pair per frame) ──────────
+        # ── Task 3: task synthesis (1 random hardcoded triple per frame) ────
         if bboxes_step:
-            candidates = []
-            for src in MOVABLE_OBJECTS:
-                for dst in VALID_DESTINATIONS.get(src, []):
-                    if src != dst and src in bboxes_step and dst in bboxes_step:
-                        candidates.append((src, dst))
+            candidates = [
+                (src, dst, task_str)
+                for src, dst, task_str in TASK_STRINGS
+                if src in bboxes_step and dst in bboxes_step
+            ]
             if candidates:
-                src_name, dst_name = random.choice(candidates)
+                src_name, dst_name, task_str = random.choice(candidates)
                 rec = _generate_task_synthesis_record(
-                    src_name, dst_name, bboxes_step, sg_triplets, img_rel
+                    src_name, dst_name, task_str, bboxes_step, sg_triplets, img_rel
                 )
                 if rec is not None:
                     records.append(rec)

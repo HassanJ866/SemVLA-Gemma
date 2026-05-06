@@ -155,7 +155,7 @@ class SemanticActionAdapter(nn.Module):
 
     def forward(
         self,
-        semantic_ids: torch.Tensor,    # [B, 4]
+        task_emb: torch.Tensor,        # [B, task_embed_dim]
         graph: torch.Tensor,           # [B, K, graph_feat_dim]  (K=1 for simple encoder)
         state: torch.Tensor,           # [B, state_dim]
         noisy_actions: torch.Tensor,   # [B, chunk_size, action_dim]
@@ -163,10 +163,10 @@ class SemanticActionAdapter(nn.Module):
     ) -> torch.Tensor:                 # [B, chunk_size, action_dim]
 
         # build conditioning context tokens
-        sem_tokens   = self.semantic_embed(semantic_ids)          # [B, 4, H]
+        task_token   = self.task_proj(task_emb).unsqueeze(1)      # [B, 1, H]
         graph_tokens = self.graph_proj(graph)                     # [B, K, H]
         state_token  = self.state_proj(state).unsqueeze(1)        # [B, 1, H]
-        context = torch.cat([sem_tokens, graph_tokens, state_token], dim=1)  # [B, 4+K+1, H]
+        context = torch.cat([task_token, graph_tokens, state_token], dim=1)  # [B, 1+K+1, H]
 
         # build action query tokens + tau conditioning
         tau_emb = self.tau_embed(tau).unsqueeze(1)                # [B, 1, H]
@@ -197,7 +197,7 @@ class SemanticActionAdapter(nn.Module):
             "graph_feat_dim": self.graph_proj.in_features,
             "state_dim": self.state_proj.in_features,
             "ffn_mult": 4,
-            "vocab_size": self.semantic_embed.num_embeddings,
+            "task_embed_dim": self.task_embed_dim,
         }
         with open(out / "adapter_config.json", "w") as f:
             json.dump(cfg, f, indent=2)
