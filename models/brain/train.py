@@ -44,103 +44,35 @@ class ThreeTaskDataset(Dataset):
     def __getitem__(self, idx):
         rec = self.records[idx]
         sample = format_training_sample(rec)
+
         image = None
         img_rel = rec.get("image")
         if img_rel:
             img_path = self.image_root / img_rel
             if img_path.exists():
                 image = Image.open(img_path).convert("RGB")
-        return {
-            "messages":    sample["messages"],
-            "image":       image,
-            "target_text": sample["target"],
-            "task_type":   rec["task_type"],
-        }
+        if image is None:
+            image = Image.new("RGB", (224, 224), color=(128, 128, 128))
 
+        # Inject the PIL image into the {"type":"image"} slot so
+        # UnslothVisionDataCollator can extract it during collation.
+        messages = []
+        for msg in sample["messages"]:
+            new_content = []
+            for part in msg["content"]:
+                if part["type"] == "image":
+                    new_content.append({"type": "image", "image": image})
+                else:
+                    new_content.append(part)
+            messages.append({"role": msg["role"], "content": new_content})
 
-def collate_fn(batch, processor, device, max_length: int = 1024):
-    """
-    Two-step encoding required by Gemma4:
-      1. apply_chat_template(tokenize=False) → rendered text string
-      2. processor(text=..., images=...) → input_ids + pixel_values + pixel_position_ids
-    Doing both in one apply_chat_template(tokenize=True) call does not populate
-    pixel_position_ids, which causes an AttributeError in modeling_gemma4.py.
-    """
-    placeholder = Image.new("RGB", (224, 224), color=(128, 128, 128))
-    pad_id = processor.tokenizer.pad_token_id or 0
+        # Append the assistant turn with the target output.
+        messages.append({
+            "role": "assistant",
+            "content": [{"type": "text", "text": sample["target"]}],
+        })
 
-    all_encodings = []
-    for item in batch:
-        img = item["image"] if item["image"] is not None else placeholder
-
-        full_messages = item["messages"] + [
-            {"role": "assistant", "content": [{"type": "text", "text": item["target_text"]}]}
-        ]
-
-        # Step 1: render to text string (no tokenization, no image processing)
-        text = processor.apply_chat_template(
-            full_messages,
-            tokenize=False,
-            add_generation_prompt=False,
-        )
-
-        # Step 2: processor handles tokenization + image encoding → pixel_position_ids
-        enc = processor(
-            text=text,
-            images=[img],
-            return_tensors="pt",
-            truncation=True,
-            max_length=max_length,
-        )
-        all_encodings.append(enc)
-
-    max_len = max(e["input_ids"].shape[1] for e in all_encodings)
-    input_ids_list, attn_mask_list, labels_list = [], [], []
-    pixel_values_list, pixel_position_ids_list = [], []
-
-    for enc, item in zip(all_encodings, batch):
-        ids  = enc["input_ids"][0]
-        mask = enc["attention_mask"][0]
-        pad_len = max_len - ids.shape[0]
-        ids  = torch.cat([ids,  ids.new_full((pad_len,), pad_id)])
-        mask = torch.cat([mask, mask.new_zeros(pad_len)])
-
-        lbl = ids.clone()
-        target_ids = processor.tokenizer(
-            item["target_text"], add_special_tokens=False
-        )["input_ids"]
-        tgt_len   = len(target_ids)
-        full_list = ids.tolist()
-        start_pos = -1
-        for j in range(len(full_list) - tgt_len, -1, -1):
-            if full_list[j:j + tgt_len] == target_ids:
-                start_pos = j
-                break
-        if start_pos >= 0:
-            lbl[:start_pos] = -100
-        else:
-            lbl[:int(0.8 * len(lbl))] = -100
-        lbl[mask == 0] = -100
-
-        input_ids_list.append(ids)
-        attn_mask_list.append(mask)
-        labels_list.append(lbl)
-        if "pixel_values" in enc:
-            pixel_values_list.append(enc["pixel_values"])
-        if "pixel_position_ids" in enc:
-            pixel_position_ids_list.append(enc["pixel_position_ids"])
-
-    result = {
-        "input_ids":      torch.stack(input_ids_list).to(device),
-        "attention_mask": torch.stack(attn_mask_list).to(device),
-        "labels":         torch.stack(labels_list).to(device),
-        "task_types":     [item["task_type"] for item in batch],
-    }
-    if pixel_values_list:
-        result["pixel_values"] = torch.cat(pixel_values_list, dim=0).to(device)
-    if pixel_position_ids_list:
-        result["pixel_position_ids"] = torch.cat(pixel_position_ids_list, dim=0).to(device)
-    return result
+        return {"messages": messages, "task_type": rec["task_type"]}
 
 
 # ── checkpoint helpers ─────────────────────────────────────────────────────────
@@ -167,7 +99,6 @@ def save_checkpoint(model, processor, optimizer, scheduler, step: int,
     torch.save({"global_step": step},   ckpt_dir / "train_state.pt")
     log.info(f"Checkpoint saved: {ckpt_dir}")
 
-    # keep only the last N checkpoints to save disk
     all_ckpts = sorted(out.glob("checkpoint-*"),
                        key=lambda p: int(p.name.split("-")[1]))
     for old in all_ckpts[:-keep_last]:
@@ -229,7 +160,6 @@ def main(cfg: DictConfig):
     log.info(OmegaConf.to_yaml(cfg))
     os.makedirs(cfg.output_dir, exist_ok=True)
 
-    # ── resume detection ───────────────────────────────────────────────────
     resume_ckpt, start_step = find_latest_checkpoint(cfg.output_dir)
     if resume_ckpt:
         log.info(f"Resuming from checkpoint: {resume_ckpt} (step {start_step})")
@@ -250,7 +180,6 @@ def main(cfg: DictConfig):
     # ── model ──────────────────────────────────────────────────────────────
     from unsloth import FastVisionModel
 
-    # load from checkpoint if resuming, otherwise from base model
     model_source = str(resume_ckpt) if resume_ckpt else cfg.model_id
     log.info(f"Loading model from: {model_source}")
 
@@ -262,7 +191,6 @@ def main(cfg: DictConfig):
     )
 
     if cfg.use_lora and not resume_ckpt:
-        # only apply LoRA config on fresh start; resume loads adapters from ckpt
         model = FastVisionModel.get_peft_model(
             model,
             r=cfg.lora.r,
@@ -278,15 +206,25 @@ def main(cfg: DictConfig):
     model.print_trainable_parameters()
 
     # ── data ───────────────────────────────────────────────────────────────
+    from unsloth.trainer import UnslothVisionDataCollator
+
     train_ds = ThreeTaskDataset(cfg.train_jsonl, cfg.image_root)
     val_ds   = ThreeTaskDataset(cfg.val_jsonl,   cfg.image_root)
     log.info(f"Train samples: {len(train_ds):,}  Val samples: {len(val_ds):,}")
 
-    _collate     = lambda b: collate_fn(b, processor, device, cfg.max_length)
+    def collate_with_task_types(batch):
+        task_types = [item["task_type"] for item in batch]
+        # UnslothVisionDataCollator expects list of {"messages": [...]} dicts
+        collated = UnslothVisionDataCollator(model, processor)(batch)
+        collated["task_types"] = task_types
+        return collated
+
     train_loader = DataLoader(train_ds, batch_size=cfg.per_device_batch_size,
-                              shuffle=True,  collate_fn=_collate, num_workers=0)
+                              shuffle=True,  collate_fn=collate_with_task_types,
+                              num_workers=0)
     val_loader   = DataLoader(val_ds,   batch_size=cfg.per_device_batch_size,
-                              shuffle=False, collate_fn=_collate, num_workers=0)
+                              shuffle=False, collate_fn=collate_with_task_types,
+                              num_workers=0)
 
     # ── optimiser & scheduler ──────────────────────────────────────────────
     optimizer = torch.optim.AdamW(
@@ -299,7 +237,6 @@ def main(cfg: DictConfig):
         num_training_steps=cfg.max_steps,
     )
 
-    # restore optimizer + scheduler state if resuming
     if resume_ckpt:
         opt_path = resume_ckpt / "optimizer.pt"
         sch_path = resume_ckpt / "scheduler.pt"
@@ -311,7 +248,7 @@ def main(cfg: DictConfig):
             log.info("Scheduler state restored.")
 
     # ── training ───────────────────────────────────────────────────────────
-    model.train()
+    FastVisionModel.for_training(model)
     global_step = start_step
     grad_accum  = cfg.get("grad_accum_steps", 1)
     optimizer.zero_grad()
@@ -319,7 +256,6 @@ def main(cfg: DictConfig):
     accum: dict[str, float]      = defaultdict(float)
     accum_counts: dict[str, int] = defaultdict(int)
 
-    # how many batches to skip at the start of the first epoch when resuming
     batches_to_skip = start_step % len(train_loader) if start_step > 0 else 0
 
     while global_step < cfg.max_steps:
@@ -327,14 +263,15 @@ def main(cfg: DictConfig):
             if global_step >= cfg.max_steps:
                 break
 
-            # skip already-completed batches in the resumed epoch
             if batches_to_skip > 0:
                 batches_to_skip -= 1
                 continue
 
             task_types = batch.pop("task_types")
-            outputs    = model(**batch)
-            loss       = outputs.loss / grad_accum
+            batch = {k: v.to(device) if isinstance(v, torch.Tensor) else v
+                     for k, v in batch.items()}
+            outputs = model(**batch)
+            loss    = outputs.loss / grad_accum
             loss.backward()
 
             raw_loss = outputs.loss.item()
@@ -392,7 +329,7 @@ def main(cfg: DictConfig):
                 save_checkpoint(model, processor, optimizer, scheduler,
                                 global_step, cfg.output_dir)
 
-        batches_to_skip = 0  # only skip on first epoch pass after resume
+        batches_to_skip = 0
 
     # ── final save ─────────────────────────────────────────────────────────
     final_dir = Path(cfg.output_dir) / "final"

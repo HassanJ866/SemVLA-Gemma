@@ -93,17 +93,18 @@ class BrainInference:
 
 def _call(self, messages: list[dict], image: Image.Image | None,
               schema: dict) -> dict:
-        # Two-step: apply_chat_template renders text only; processor call
-        # generates pixel_values + pixel_position_ids required by Gemma4.
+        # Unsloth/Gemma4 inference pattern: apply_chat_template renders the
+        # text string, then processor(image, text) produces all required tensors
+        # including image_position_ids.
         text = self.processor.apply_chat_template(
             messages,
             tokenize=False,
             add_generation_prompt=True,
         )
-        images = [image] if image is not None else None
         enc = self.processor(
-            text=text,
-            images=images,
+            image,
+            text,
+            add_special_tokens=False,
             return_tensors="pt",
         )
         enc = {k: v.to(self.device) for k, v in enc.items()
