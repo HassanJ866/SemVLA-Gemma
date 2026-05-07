@@ -50,8 +50,8 @@ class SemVLAConfig(PreTrainedConfig):
     # Expert hidden size as a fraction of Gemma4's text hidden size (2048 for E4B)
     expert_width_multiplier: float = 0.5
 
-    # How many VLM layers the expert mirrors; -1 = same as VLM
-    num_expert_layers: int = -1
+    # How many VLM layers the expert mirrors; must divide num_vlm_layers (42)
+    num_expert_layers: int = 7
 
     # Attention mode between VLM prefix and expert suffix
     # "cross_attn": expert Q attends to VLM K/V (recommended — expert stays small)
