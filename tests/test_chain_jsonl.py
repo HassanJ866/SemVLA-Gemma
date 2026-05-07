@@ -17,21 +17,30 @@ from models.brain.prompts import (
 )
 
 
+def _content_types(msg):
+    return [c["type"] for c in msg["content"]]
+
+def _content_text(msg):
+    return " ".join(c["text"] for c in msg["content"] if c["type"] == "text")
+
+
 def test_grounding_prompt_structure():
     msgs = grounding_prompt("pick up the red bowl")
     assert len(msgs) == 2
     assert msgs[0]["role"] == "system"
     assert msgs[1]["role"] == "user"
-    assert "pick up the red bowl" in msgs[1]["content"]
-    assert "<image>" in msgs[1]["content"]
+    assert "image" in _content_types(msgs[1])
+    assert "pick up the red bowl" in _content_text(msgs[1])
 
 
 def test_parsing_prompt_structure():
     bboxes = [{"name": "bowl", "bbox": [10, 20, 50, 60]}]
     msgs = parsing_prompt(bboxes)
     assert msgs[1]["role"] == "user"
-    assert "bowl" in msgs[1]["content"]
-    assert "triplets" in msgs[1]["content"]
+    assert "image" in _content_types(msgs[1])
+    text = _content_text(msgs[1])
+    assert "bowl" in text
+    assert "triplets" in text
 
 
 def test_task_synthesis_prompt_structure():
@@ -42,10 +51,11 @@ def test_task_synthesis_prompt_structure():
         src_graph,
     )
     assert msgs[1]["role"] == "user"
-    assert "<image>" in msgs[1]["content"]
-    assert "akita_black_bowl_1" in msgs[1]["content"]
-    assert "plate_1" in msgs[1]["content"]
-    assert "task" in msgs[1]["content"]
+    assert "image" in _content_types(msgs[1])
+    text = _content_text(msgs[1])
+    assert "akita_black_bowl_1" in text
+    assert "plate_1" in text
+    assert "task" in text
 
 
 def test_format_grounding_sample():

@@ -72,7 +72,7 @@ def collate_fn(batch, processor, device, max_length: int = 1024):
     for item in batch:
         img = item["image"] if item["image"] is not None else placeholder
         full_messages = item["messages"] + [
-            {"role": "assistant", "content": item["target_text"]}
+            {"role": "assistant", "content": [{"type": "text", "text": item["target_text"]}]}
         ]
         enc = processor.apply_chat_template(
             full_messages,

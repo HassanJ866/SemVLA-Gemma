@@ -2,8 +2,8 @@
 Prompt templates for the three brain tasks.
 
 Each function returns a list of messages in the format expected by
-transformers / Gemma chat templates (role + content dicts).
-The <image> token is injected where the model expects it.
+transformers / Gemma4 chat templates (role + content as list of typed dicts).
+Images are represented as {"type": "image"} entries; text as {"type": "text", "text": ...}.
 """
 
 import json
@@ -16,66 +16,63 @@ SYSTEM_MSG = (
 
 
 def grounding_prompt(instruction: str) -> list[dict]:
-    """
-    Task 1 — Grounding.
-    Returns a conversation that ends with the assistant turn empty (to be filled
-    by the model).
-    """
-    user_content = (
-        f"Task: {instruction}\n\n"
-        "<image>\n\n"
-        "Locate the target object mentioned in the task. "
-        'Output a JSON object with keys "object" (string) and '
-        '"bbox" ([x1, y1, x2, y2] pixel coordinates).'
-    )
     return [
-        {"role": "system", "content": SYSTEM_MSG},
-        {"role": "user", "content": user_content},
+        {"role": "system", "content": [{"type": "text", "text": SYSTEM_MSG}]},
+        {
+            "role": "user",
+            "content": [
+                {"type": "image"},
+                {"type": "text", "text": (
+                    f"Task: {instruction}\n\n"
+                    "Locate the target object mentioned in the task. "
+                    'Output a JSON object with keys "object" (string) and '
+                    '"bbox" ([x1, y1, x2, y2] pixel coordinates).'
+                )},
+            ],
+        },
     ]
 
 
 def parsing_prompt(bboxes: list[dict]) -> list[dict]:
-    """
-    Task 2 — Scene-graph parsing.
-    bboxes: list of {"name": str, "bbox": [x1,y1,x2,y2]}
-    """
     bbox_str = json.dumps(bboxes, separators=(",", ":"))
-    user_content = (
-        "<image>\n\n"
-        f"Detected objects: {bbox_str}\n\n"
-        "Output the bidirectional spatial scene graph for all objects. "
-        'Use JSON with key "triplets": a list of [subject, relation, object] arrays. '
-        "Relations must be from: is_left_of, is_right_of, is_above, is_below, "
-        "is_in_front_of, is_behind, is_on, is_under, is_inside, contains. "
-        "Include both directions for every spatial relation."
-    )
     return [
-        {"role": "system", "content": SYSTEM_MSG},
-        {"role": "user", "content": user_content},
+        {"role": "system", "content": [{"type": "text", "text": SYSTEM_MSG}]},
+        {
+            "role": "user",
+            "content": [
+                {"type": "image"},
+                {"type": "text", "text": (
+                    f"Detected objects: {bbox_str}\n\n"
+                    "Output the bidirectional spatial scene graph for all objects. "
+                    'Use JSON with key "triplets": a list of [subject, relation, object] arrays. '
+                    "Relations must be from: is_left_of, is_right_of, is_above, is_below, "
+                    "is_in_front_of, is_behind, is_on, is_under, is_inside, contains. "
+                    "Include both directions for every spatial relation."
+                )},
+            ],
+        },
     ]
 
 
 def task_synthesis_prompt(src_name: str, src_bbox: list, dst_name: str,
                            dst_bbox: list, src_graph: list) -> list[dict]:
-    """
-    Task 3 — Task synthesis.
-    Given two objects (source to move + destination) and the source object's
-    local scene graph, output a natural language pick-and-place task string.
-    src_graph: list of [subject, relation, object] triplets where subject == src_name
-    """
     src_graph_str = json.dumps(src_graph, separators=(",", ":"))
-    user_content = (
-        "<image>\n\n"
-        f"Source object: {src_name}  bbox: {src_bbox}  (the object to pick up)\n"
-        f"Destination object: {dst_name}  bbox: {dst_bbox}  (where to place it)\n"
-        f"Source spatial context: {src_graph_str}\n\n"
-        "Describe a pick-and-place task that moves the source object to the destination. "
-        'Output JSON with key "task": a natural language instruction string. '
-        'Example: {"task": "pick up the black bowl on the ramekin and place it on the plate"}'
-    )
     return [
-        {"role": "system", "content": SYSTEM_MSG},
-        {"role": "user", "content": user_content},
+        {"role": "system", "content": [{"type": "text", "text": SYSTEM_MSG}]},
+        {
+            "role": "user",
+            "content": [
+                {"type": "image"},
+                {"type": "text", "text": (
+                    f"Source object: {src_name}  bbox: {src_bbox}  (the object to pick up)\n"
+                    f"Destination object: {dst_name}  bbox: {dst_bbox}  (where to place it)\n"
+                    f"Source spatial context: {src_graph_str}\n\n"
+                    "Describe a pick-and-place task that moves the source object to the destination. "
+                    'Output JSON with key "task": a natural language instruction string. '
+                    'Example: {"task": "pick up the black bowl on the ramekin and place it on the plate"}'
+                )},
+            ],
+        },
     ]
 
 
