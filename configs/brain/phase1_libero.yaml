@@ -4,7 +4,8 @@
 run_name: brain_phase1_libero_lora
 
 # Model
-model_id: google/gemma-4-E4B-it   # Gemma 4 efficient 4B multimodal, instruction-tuned
+model_id: unsloth/gemma-4-E4B-it   # Unsloth-optimized Gemma 4 multimodal
+load_in_4bit: true                 # QLoRA: 4-bit quantization
 
 # LoRA
 use_lora: true

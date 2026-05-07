@@ -5,7 +5,7 @@ Usage:
     python -m models.brain.train --config-name=phase1_libero
 
 The trainer:
-  1. Loads Gemma 4 E4B multimodal with LoRA from a Hydra config.
+  1. Loads Gemma 4 E4B multimodal with Unsloth FastVisionModel + QLoRA.
   2. Streams the 3-task JSONL from data/splits/libero_train.jsonl.
   3. Applies chat-template + image tokenisation.
   4. Trains with causal-LM loss masked to output tokens only.
@@ -32,16 +32,10 @@ from pathlib import Path
 
 import hydra
 import torch
-import wandb
 from omegaconf import DictConfig, OmegaConf
 from PIL import Image
 from torch.utils.data import DataLoader, Dataset
-from transformers import (
-    AutoProcessor,
-    AutoModelForImageTextToText,
-    get_cosine_schedule_with_warmup,
-)
-from peft import LoraConfig, get_peft_model, TaskType
+from transformers import get_cosine_schedule_with_warmup
 
 from models.brain.prompts import format_training_sample
 
@@ -143,7 +137,6 @@ def collate_fn(batch, processor, device, max_length: int = 1024):
 # ── evaluation ─────────────────────────────────────────────────────────────────
 
 def evaluate(model, val_loader, device) -> dict:
-    """Returns aggregate val loss + per-task-type breakdown."""
     model.eval()
     total_loss = 0.0
     task_loss: dict[str, list[float]] = defaultdict(list)
@@ -151,10 +144,13 @@ def evaluate(model, val_loader, device) -> dict:
 
     with torch.no_grad():
         for batch in val_loader:
+            pixel_values = batch.get("pixel_values")
+            if pixel_values is not None:
+                pixel_values = pixel_values.to(device)
             outputs = model(
                 input_ids=batch["input_ids"],
                 attention_mask=batch["attention_mask"],
-                pixel_values=batch.get("pixel_values"),
+                pixel_values=pixel_values,
                 labels=batch["labels"],
             )
             loss_val = outputs.loss.item()
@@ -200,35 +196,39 @@ def main(cfg: DictConfig):
 
     use_wandb = bool(cfg.get("wandb_project"))
     if use_wandb:
+        import wandb
         wandb.init(project=cfg.wandb_project, name=cfg.run_name,
                    config=OmegaConf.to_container(cfg, resolve=True))
 
-    csv_log = CSVLogger(f"logs/brain_train_metrics.csv")
+    csv_log = CSVLogger("logs/brain_train_metrics.csv")
 
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     log.info(f"Device: {device}")
 
-    # ── model ──────────────────────────────────────────────────────────────
+    # ── model: Unsloth FastVisionModel ─────────────────────────────────────
     log.info(f"Loading: {cfg.model_id}")
-    processor = AutoProcessor.from_pretrained(cfg.model_id, trust_remote_code=True)
-    model = AutoModelForImageTextToText.from_pretrained(
-        cfg.model_id,
-        torch_dtype=torch.bfloat16,
-        trust_remote_code=True,
-    ).to(device)
+    from unsloth import FastVisionModel
+
+    model, processor = FastVisionModel.from_pretrained(
+        model_name=cfg.model_id,
+        max_seq_length=cfg.max_length,
+        load_in_4bit=cfg.get("load_in_4bit", True),
+        dtype=torch.bfloat16,
+    )
 
     if cfg.use_lora:
-        lora_cfg = LoraConfig(
-            task_type=TaskType.CAUSAL_LM,
+        model = FastVisionModel.get_peft_model(
+            model,
             r=cfg.lora.r,
             lora_alpha=cfg.lora.alpha,
-            target_modules=list(cfg.lora.target_modules),
             lora_dropout=cfg.lora.dropout,
-            bias="none",
-            # exclude vision tower — Gemma4ClippableLinear is not supported by PEFT
-            exclude_modules=["vision_tower", "multi_modal_projector"],
+            target_modules=list(cfg.lora.target_modules),
+            # fine-tune language layers only; vision tower stays frozen
+            finetune_vision_layers=False,
+            finetune_language_layers=True,
+            finetune_attention_modules=True,
+            finetune_mlp_modules=True,
         )
-        model = get_peft_model(model, lora_cfg)
         model.print_trainable_parameters()
 
     if cfg.get("compile", False):
@@ -261,7 +261,6 @@ def main(cfg: DictConfig):
     grad_accum  = cfg.get("grad_accum_steps", 1)
     optimizer.zero_grad()
 
-    # accumulators reset every log_steps
     accum: dict[str, float] = defaultdict(float)
     accum_counts: dict[str, int] = defaultdict(int)
 
@@ -270,16 +269,19 @@ def main(cfg: DictConfig):
             if global_step >= cfg.max_steps:
                 break
 
+            pixel_values = batch.get("pixel_values")
+            if pixel_values is not None:
+                pixel_values = pixel_values.to(device)
+
             outputs = model(
                 input_ids=batch["input_ids"],
                 attention_mask=batch["attention_mask"],
-                pixel_values=batch.get("pixel_values"),
+                pixel_values=pixel_values,
                 labels=batch["labels"],
             )
             loss = outputs.loss / grad_accum
             loss.backward()
 
-            # accumulate per-task loss for logging
             raw_loss = outputs.loss.item()
             accum["loss"] += raw_loss
             accum_counts["loss"] += 1
@@ -318,14 +320,13 @@ def main(cfg: DictConfig):
                 )
 
                 if use_wandb:
+                    import wandb
                     wandb.log(
                         {f"train/{k}": v for k, v in row.items() if k != "step"},
                         step=global_step,
                     )
 
                 csv_log.log({"phase": "train", **row})
-
-                # reset accumulators
                 accum.clear()
                 accum_counts.clear()
 
@@ -336,6 +337,7 @@ def main(cfg: DictConfig):
                          "  ".join(f"{k}={v:.4f}" for k, v in metrics.items()))
 
                 if use_wandb:
+                    import wandb
                     wandb.log({f"eval/{k}": v for k, v in metrics.items()},
                               step=global_step)
 
@@ -356,6 +358,7 @@ def main(cfg: DictConfig):
 
     csv_log.close()
     if use_wandb:
+        import wandb
         wandb.finish()
 
 
