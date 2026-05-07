@@ -27,7 +27,7 @@ MERGED="$PROJECT_DIR/ckpts/brain_phase1/final"
 if [ ! -d "$MERGED" ]; then
     echo "[$(date)] Merging LoRA adapter ..."
     python scripts/merge_brain.py \
-        --adapter ckpts/checkpoint-1500 \
+        --adapter ckpts/brain_phase1/checkpoint-1500 \
         --output  "$MERGED"
 else
     echo "[$(date)] Merged model already exists at $MERGED, skipping merge."
