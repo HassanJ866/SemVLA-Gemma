@@ -1,44 +1,51 @@
-#!/bin/bash
-#SBATCH --job-name=semvla_train
-#SBATCH --partition=TODO_PARTITION        # <-- replace with your partition name
-#SBATCH --account=TODO_ACCOUNT           # <-- replace with your account/project name
-#SBATCH --nodes=1
-#SBATCH --ntasks-per-node=1
-#SBATCH --cpus-per-task=8
+#!/usr/bin/env bash
+#SBATCH --partition=gpu_a40
 #SBATCH --gres=gpu:1
+#SBATCH --ntasks=1
+#SBATCH --cpus-per-task=8
 #SBATCH --mem=64G
-#SBATCH --time=12:00:00
-#SBATCH --output=logs/semvla_%j.out
-#SBATCH --error=logs/semvla_%j.err
+#SBATCH --time=0-23:59:00
+#SBATCH --mail-type=ALL
+#SBATCH --mail-user=s338920@studenti.polito.it
+#SBATCH --output=logs/slurm_%j.out
+#SBATCH --error=logs/slurm_%j.err
 
-set -euo pipefail
+module purge
+module load miniforge/24.3.0-0
 
-# ── 1. Environment ────────────────────────────────────────────────────────────
-source ~/.bashrc
-conda activate vla_bench            # <-- replace with your conda env name if different
+source "$(conda info --base)/etc/profile.d/conda.sh"
+conda activate vla_bench
 
-PROJECT_DIR="$HOME/SemVLA-Gemma"    # <-- replace if your repo lives elsewhere
-cd "$PROJECT_DIR"
+cd ~/SemVLA-Gemma
 
 mkdir -p logs
 
-# ── 2. Merge LoRA brain (skip if ckpts/brain_phase1/final already exists) ────
+PROJECT_DIR="$HOME/SemVLA-Gemma"
+
+# ── 1. Merge LoRA brain (skip if already done) ────────────────────────────────
 MERGED="$PROJECT_DIR/ckpts/brain_phase1/final"
 if [ ! -d "$MERGED" ]; then
-    echo "[$(date)] Merging LoRA adapter ..."
+    echo "========================================================"
+    echo "[$(date +'%H:%M:%S')] Merging LoRA adapter ..."
+    echo "========================================================"
     python scripts/merge_brain.py \
         --adapter ckpts/brain_phase1/checkpoint-1500 \
         --output  "$MERGED"
 else
-    echo "[$(date)] Merged model already exists at $MERGED, skipping merge."
+    echo "[$(date +'%H:%M:%S')] Merged model already exists, skipping merge."
 fi
 
-# ── 3. Install lerobot (fast — skips if already installed) ───────────────────
-echo "[$(date)] Installing lerobot extras ..."
+# ── 2. Install lerobot (fast — skips if already installed) ───────────────────
+echo "========================================================"
+echo "[$(date +'%H:%M:%S')] Installing lerobot extras ..."
+echo "========================================================"
 pip install -q -e "lerobot/[smolvla,libero,training]"
 
-# ── 4. Train action head ──────────────────────────────────────────────────────
-echo "[$(date)] Starting SemVLA action-head training ..."
+# ── 3. Train action head ──────────────────────────────────────────────────────
+echo "========================================================"
+echo "[$(date +'%H:%M:%S')] Starting SemVLA action-head training ..."
+echo "========================================================"
+
 python -m lerobot.scripts.train \
     --policy.type=semvla \
     --policy.brain_model_path="$MERGED" \
@@ -52,4 +59,6 @@ python -m lerobot.scripts.train \
     --wandb.enable=true \
     --wandb.project=semvla-lerobot
 
-echo "[$(date)] Training finished."
+echo "========================================================"
+echo "[$(date +'%H:%M:%S')] Done."
+echo "========================================================"
