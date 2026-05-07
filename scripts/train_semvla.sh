@@ -29,7 +29,7 @@ if [ ! -d "$MERGED" ]; then
     echo "[$(date +'%H:%M:%S')] Merging LoRA adapter ..."
     echo "========================================================"
     python scripts/merge_brain.py \
-        --adapter ckpts/checkpoint-1500 \
+        --adapter ckpts/brain_phase1/checkpoint-1500 \
         --output  "$MERGED"
 else
     echo "[$(date +'%H:%M:%S')] Merged model already exists, skipping merge."
@@ -53,7 +53,7 @@ lerobot-train \
     --dataset.repo_id=lerobot/libero_spatial \
     --batch_size=16 \
     --steps=50000 \
-    --save_freq=1000 \
+    --save_freq=100 \
     --log_freq=100 \
     --wandb.enable=true \
     --wandb.project=semvla-lerobot
