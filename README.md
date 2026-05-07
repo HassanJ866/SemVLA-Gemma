@@ -121,8 +121,9 @@ headless-vla/
 
 | Decision | Choice | Reason |
 |---|---|---|
-| Brain model | `google/gemma-3-4b-it` | Closest available Gemma 4 multimodal; verify HF at run time |
-| Fine-tune method | LoRA r=32, α=64 | Speed; full FT is ablation |
+| Brain model | `unsloth/gemma-4-E4B-it` | Unsloth-optimized Gemma 4 efficient 4B multimodal |
+| Fine-tune method | LoRA r=32, α=64, vision layers frozen | Speed; full FT is ablation |
+| Data collation | `UnslothVisionDataCollator` | Required for Gemma4 — generates `image_position_ids` correctly |
 | Graph encoder | Bag-of-relations, 64-dim | Simple default; GNN upgrade if F1 transfer is poor |
 | Adapter conditioning | Mean-pooled task text embedding (384-dim) | Replaces discrete semantic_ids; more expressive |
 | Action normalisation | Per-dim min/max, computed before training | Must recompute if data changes |
