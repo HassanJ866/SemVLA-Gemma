@@ -1,9 +1,10 @@
 """
 Prompt templates for the three brain tasks.
 
-Each function returns a list of messages in the format expected by
-transformers / Gemma4 chat templates (role + content as list of typed dicts).
-Images are represented as {"type": "image"} entries; text as {"type": "text", "text": ...}.
+Messages use role + content as a list of typed dicts (Gemma4 format).
+apply_chat_template is called with tokenize=False to render a text string;
+the processor is then called separately with images= to get pixel_position_ids.
+The <image> placeholder is emitted as a plain text token inside the template.
 """
 
 import json

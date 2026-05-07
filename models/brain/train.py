@@ -7,9 +7,7 @@ Usage:
 Resume from latest checkpoint automatically if one exists in output_dir.
 """
 
-import base64
 import csv
-import io
 import json
 import logging
 import os
@@ -26,12 +24,6 @@ from transformers import get_cosine_schedule_with_warmup
 from models.brain.prompts import format_training_sample
 
 log = logging.getLogger(__name__)
-
-
-def _pil_to_base64(img) -> str:
-    buf = io.BytesIO()
-    img.save(buf, format="JPEG")
-    return base64.b64encode(buf.getvalue()).decode("ascii")
 
 
 # ── dataset ────────────────────────────────────────────────────────────────────
@@ -68,10 +60,11 @@ class ThreeTaskDataset(Dataset):
 
 def collate_fn(batch, processor, device, max_length: int = 1024):
     """
-    Process each sample individually using processor.apply_chat_template with
-    tokenize=True so that image tokens and pixel_values are created together
-    in the same call — required by Gemma4 to avoid token/feature mismatch.
-    Then manually pad to the same length.
+    Two-step encoding required by Gemma4:
+      1. apply_chat_template(tokenize=False) → rendered text string
+      2. processor(text=..., images=...) → input_ids + pixel_values + pixel_position_ids
+    Doing both in one apply_chat_template(tokenize=True) call does not populate
+    pixel_position_ids, which causes an AttributeError in modeling_gemma4.py.
     """
     placeholder = Image.new("RGB", (224, 224), color=(128, 128, 128))
     pad_id = processor.tokenizer.pad_token_id or 0
@@ -79,26 +72,22 @@ def collate_fn(batch, processor, device, max_length: int = 1024):
     all_encodings = []
     for item in batch:
         img = item["image"] if item["image"] is not None else placeholder
-        # transformers 5.5.0: images must be passed as base64/url/path inside the
-        # content entry — inline PIL objects are not supported until post-5.5.0.
-        img_b64 = _pil_to_base64(img)
-        messages_with_image = []
-        for msg in item["messages"]:
-            new_content = []
-            for part in msg["content"]:
-                if part["type"] == "image":
-                    new_content.append({"type": "image", "base64": img_b64})
-                else:
-                    new_content.append(part)
-            messages_with_image.append({"role": msg["role"], "content": new_content})
-        messages_with_image.append(
+
+        full_messages = item["messages"] + [
             {"role": "assistant", "content": [{"type": "text", "text": item["target_text"]}]}
-        )
-        enc = processor.apply_chat_template(
-            messages_with_image,
+        ]
+
+        # Step 1: render to text string (no tokenization, no image processing)
+        text = processor.apply_chat_template(
+            full_messages,
+            tokenize=False,
             add_generation_prompt=False,
-            tokenize=True,
-            return_dict=True,
+        )
+
+        # Step 2: processor handles tokenization + image encoding → pixel_position_ids
+        enc = processor(
+            text=text,
+            images=[img],
             return_tensors="pt",
             truncation=True,
             max_length=max_length,
@@ -106,7 +95,8 @@ def collate_fn(batch, processor, device, max_length: int = 1024):
         all_encodings.append(enc)
 
     max_len = max(e["input_ids"].shape[1] for e in all_encodings)
-    input_ids_list, attn_mask_list, labels_list, pixel_values_list = [], [], [], []
+    input_ids_list, attn_mask_list, labels_list = [], [], []
+    pixel_values_list, pixel_position_ids_list = [], []
 
     for enc, item in zip(all_encodings, batch):
         ids  = enc["input_ids"][0]
@@ -137,6 +127,8 @@ def collate_fn(batch, processor, device, max_length: int = 1024):
         labels_list.append(lbl)
         if "pixel_values" in enc:
             pixel_values_list.append(enc["pixel_values"])
+        if "pixel_position_ids" in enc:
+            pixel_position_ids_list.append(enc["pixel_position_ids"])
 
     result = {
         "input_ids":      torch.stack(input_ids_list).to(device),
@@ -146,6 +138,8 @@ def collate_fn(batch, processor, device, max_length: int = 1024):
     }
     if pixel_values_list:
         result["pixel_values"] = torch.cat(pixel_values_list, dim=0).to(device)
+    if pixel_position_ids_list:
+        result["pixel_position_ids"] = torch.cat(pixel_position_ids_list, dim=0).to(device)
     return result
 
 
