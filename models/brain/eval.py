@@ -5,7 +5,7 @@ Metrics computed:
   - JSON validity rate per task type
   - Grounding: bbox IoU (mean and median)
   - Parsing: per-relation precision, recall, F1; aggregate F1
-  - Semantic action: exact-match accuracy on (axis, direction, magnitude, gripper)
+  - Task synthesis: exact-match accuracy on generated task string
 
 Usage:
     python -m models.brain.eval \

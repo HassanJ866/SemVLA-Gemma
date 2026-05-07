@@ -217,12 +217,17 @@ def main(cfg: DictConfig):
         trust_remote_code=True,
     ).to(device)
 
+    # freeze vision tower — we only fine-tune the language model
+    for name, param in model.named_parameters():
+        if "vision_tower" in name or "multi_modal_projector" in name:
+            param.requires_grad = False
+
     if cfg.use_lora:
         lora_cfg = LoraConfig(
             task_type=TaskType.CAUSAL_LM,
             r=cfg.lora.r,
             lora_alpha=cfg.lora.alpha,
-            target_modules=list(cfg.lora.target_modules),
+            target_modules=cfg.lora.target_modules,  # "all-linear" skips non-nn.Linear automatically
             lora_dropout=cfg.lora.dropout,
             bias="none",
         )

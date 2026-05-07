@@ -12,11 +12,7 @@ lora:
   r: 32
   alpha: 64
   dropout: 0.05
-  target_modules:
-    - q_proj
-    - k_proj
-    - v_proj
-    - o_proj
+  target_modules: "all-linear"
 
 # Data
 train_jsonl: data/splits/libero_train.jsonl
