@@ -212,10 +212,11 @@ def main(cfg: DictConfig):
     val_ds   = ThreeTaskDataset(cfg.val_jsonl,   cfg.image_root)
     log.info(f"Train samples: {len(train_ds):,}  Val samples: {len(val_ds):,}")
 
+    _vision_collator = UnslothVisionDataCollator(model, processor)
+
     def collate_with_task_types(batch):
         task_types = [item["task_type"] for item in batch]
-        # UnslothVisionDataCollator expects list of {"messages": [...]} dicts
-        collated = UnslothVisionDataCollator(model, processor)(batch)
+        collated = _vision_collator(batch)
         collated["task_types"] = task_types
         return collated
 
