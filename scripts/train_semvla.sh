@@ -29,7 +29,7 @@ if [ ! -d "$MERGED" ]; then
     echo "[$(date +'%H:%M:%S')] Merging LoRA adapter ..."
     echo "========================================================"
     python scripts/merge_brain.py \
-        --adapter ckpts/brain_phase1/checkpoint-1500 \
+        --adapter ckpts/checkpoint-1500 \
         --output  "$MERGED"
 else
     echo "[$(date +'%H:%M:%S')] Merged model already exists, skipping merge."
@@ -46,16 +46,15 @@ echo "========================================================"
 echo "[$(date +'%H:%M:%S')] Starting SemVLA action-head training ..."
 echo "========================================================"
 
-python -m lerobot.scripts.train \
+lerobot-train \
     --policy.type=semvla \
     --policy.brain_model_path="$MERGED" \
     --policy.device=cuda \
     --dataset.repo_id=lerobot/libero_spatial \
-    --dataset.image_transforms.enable=true \
-    --training.num_epochs=100 \
-    --training.batch_size=16 \
-    --training.grad_clip_norm=10.0 \
-    --output_dir=ckpts/semvla_action_head \
+    --batch_size=16 \
+    --steps=50000 \
+    --save_freq=1000 \
+    --log_freq=100 \
     --wandb.enable=true \
     --wandb.project=semvla-lerobot
 
