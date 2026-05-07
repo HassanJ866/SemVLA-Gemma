@@ -14,7 +14,6 @@ Usage:
 
 import json
 import logging
-from typing import Any
 
 import torch
 from PIL import Image
@@ -75,7 +74,6 @@ class BrainInference:
         self.device = device or ("cuda" if torch.cuda.is_available() else "cpu")
         self.max_new_tokens = max_new_tokens
         self.temperature = temperature
-        self._generators: dict[str, Any] = {}
         self._load_model()
 
     def _load_model(self):
@@ -93,47 +91,34 @@ class BrainInference:
         self.model.eval()
         log.info("Brain loaded.")
 
-    def _get_generator(self, schema: dict):
-        key = json.dumps(schema, sort_keys=True)
-        if key not in self._generators:
-            try:
-                import outlines
-                import outlines.models as omodels
-                wrapped = omodels.Transformers(self.model, self.processor.tokenizer)
-                self._generators[key] = outlines.generate.json(wrapped, schema)
-            except Exception as e:
-                log.warning(f"outlines unavailable ({e}); using unconstrained greedy decoding")
-                self._generators[key] = None
-        return self._generators[key]
-
-    def _call(self, messages: list[dict], image: Image.Image | None,
+def _call(self, messages: list[dict], image: Image.Image | None,
               schema: dict) -> dict:
-        text = self.processor.apply_chat_template(
-            messages, tokenize=False, add_generation_prompt=True
-        )
-
-        gen = self._get_generator(schema)
-        if gen is not None:
-            result = gen(text, images=[image] if image is not None else None)
-            return result if isinstance(result, dict) else json.loads(result)
-
-        # fallback: plain HF generate + manual JSON parse
-        enc = self.processor(
-            text=[text],
-            images=[image] if image is not None else None,
+        # Gemma4 requires image and text to be processed together in one call
+        # so that image tokens in the text match the pixel_values tensor.
+        images = [image] if image is not None else None
+        enc = self.processor.apply_chat_template(
+            messages,
+            add_generation_prompt=True,
+            tokenize=True,
+            return_dict=True,
             return_tensors="pt",
-            padding=True,
+            images=images,
         )
-        enc = {k: v.to(self.device) for k, v in enc.items() if v is not None}
+        enc = {k: v.to(self.device) for k, v in enc.items()
+               if isinstance(v, torch.Tensor)}
+
         with torch.no_grad():
             out_ids = self.model.generate(
                 **enc,
                 max_new_tokens=self.max_new_tokens,
                 do_sample=self.temperature > 0,
                 temperature=self.temperature if self.temperature > 0 else None,
+                use_cache=True,
             )
         new_tokens = out_ids[0, enc["input_ids"].shape[1]:]
-        text_out = self.processor.decode(new_tokens, skip_special_tokens=True).strip()
+        text_out = self.processor.tokenizer.decode(
+            new_tokens, skip_special_tokens=True
+        ).strip()
         return json.loads(text_out)
 
     # ── public API ────────────────────────────────────────────────────────
