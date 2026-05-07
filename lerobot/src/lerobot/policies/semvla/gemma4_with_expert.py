@@ -151,8 +151,16 @@ class Gemma4WithExpertModel(nn.Module):
         # Remove unused embedding table from expert
         self.lm_expert.embed_tokens = None
 
-        self.num_attention_heads = self._text_model.config.num_attention_heads
-        self.num_key_value_heads = self._text_model.config.num_key_value_heads
+        # VLM head config
+        self.vlm_num_attention_heads = self._text_model.config.num_attention_heads
+        self.vlm_num_key_value_heads = self._text_model.config.num_key_value_heads
+        self.vlm_head_dim = self._text_model.config.head_dim
+
+        # Expert head config (scaled-down hidden, same num_heads → smaller head_dim)
+        self.expert_num_attention_heads = expert_config.num_attention_heads
+        self.expert_num_key_value_heads = expert_config.num_key_value_heads
+        self.expert_head_dim = expert_config.hidden_size // expert_config.num_attention_heads
+
         self.expert_hidden_size = expert_config.hidden_size
         self.attention_mode = attention_mode
         self.freeze_vision_encoder = freeze_vision_encoder
@@ -276,11 +284,12 @@ class Gemma4WithExpertModel(nn.Module):
         position_ids,
         attention_mask,
         batch_size,
-        head_dim,
         use_cache=True,
         fill_kv_cache=True,
         past_key_values=None,
     ):
+        # Self-attention: VLM and expert attend jointly to their concatenated tokens.
+        # Each model segment uses its own head_dim from the layer config.
         query_states = []
         key_states = []
         value_states = []
@@ -316,7 +325,12 @@ class Gemma4WithExpertModel(nn.Module):
                 key_states = torch.cat([past_key_values[layer_idx]["key_states"], key_states], dim=1)
                 value_states = torch.cat([past_key_values[layer_idx]["value_states"], value_states], dim=1)
 
-        att_output = self._eager_attention(_mask, batch_size, head_dim, query_states, key_states, value_states)
+        # Use VLM head config for the joint self-attention pass
+        att_output = self._eager_attention(
+            _mask, batch_size, self.vlm_head_dim,
+            self.vlm_num_attention_heads, self.vlm_num_key_value_heads,
+            query_states, key_states, value_states,
+        )
         return [att_output], past_key_values
 
     def forward_cross_attn_layer(
@@ -327,7 +341,6 @@ class Gemma4WithExpertModel(nn.Module):
         position_ids,
         attention_mask,
         batch_size,
-        head_dim,
         use_cache=True,
         fill_kv_cache=True,
         past_key_values=None,
@@ -350,7 +363,11 @@ class Gemma4WithExpertModel(nn.Module):
             q = apply_rope(q, pos_id)
             key_states = apply_rope(k, pos_id)
             value_states = v
-            att_outputs.append(self._eager_attention(prefix_mask, batch_size, head_dim, q, key_states, value_states))
+            att_outputs.append(self._eager_attention(
+                prefix_mask, batch_size, self.vlm_head_dim,
+                self.vlm_num_attention_heads, self.vlm_num_key_value_heads,
+                q, key_states, value_states,
+            ))
         else:
             expert_position_id = position_ids
 
@@ -369,6 +386,7 @@ class Gemma4WithExpertModel(nn.Module):
             eshape = (*ehs.shape[:-1], -1, expert_layer.self_attn.head_dim)
             ehs = ehs.to(dtype=expert_layer.self_attn.q_proj.weight.dtype)
             eq = expert_layer.self_attn.q_proj(ehs).view(eshape)
+            # k/v_proj on expert cross-attn layers project FROM VLM KV dims TO expert KV dims
             _k = key_states.to(expert_layer.self_attn.k_proj.weight.dtype).view(*key_states.shape[:2], -1)
             ek = expert_layer.self_attn.k_proj(_k).view(*_k.shape[:-1], -1, expert_layer.self_attn.head_dim)
             _v = value_states.to(expert_layer.self_attn.v_proj.weight.dtype).view(*value_states.shape[:2], -1)
@@ -376,7 +394,11 @@ class Gemma4WithExpertModel(nn.Module):
             expert_position_id = expert_position_id - torch.min(expert_position_id, dim=1, keepdim=True).values
             emask = attention_mask[:, -inputs_embeds[1].shape[1]:, :ek.shape[1]]
             eq = apply_rope(eq, expert_position_id)
-            att_outputs.append(self._eager_attention(emask, batch_size, head_dim, eq, ek, ev))
+            att_outputs.append(self._eager_attention(
+                emask, batch_size, self.expert_head_dim,
+                self.expert_num_attention_heads, self.expert_num_key_value_heads,
+                eq, ek, ev,
+            ))
         else:
             att_outputs.append(None)
 
@@ -412,8 +434,6 @@ class Gemma4WithExpertModel(nn.Module):
                 batch_size = hs.shape[0]
                 break
 
-        head_dim = self._text_model.config.head_dim
-
         for layer_idx in range(self.num_vlm_layers):
             use_self_attn = (
                 fill_kv_cache
@@ -423,14 +443,14 @@ class Gemma4WithExpertModel(nn.Module):
             if use_self_attn:
                 att_outputs, past_key_values = self.forward_attn_layer(
                     model_layers, inputs_embeds, layer_idx,
-                    position_ids, attention_mask, batch_size, head_dim,
+                    position_ids, attention_mask, batch_size,
                     use_cache=use_cache, fill_kv_cache=fill_kv_cache,
                     past_key_values=past_key_values,
                 )
             else:
                 att_outputs, past_key_values = self.forward_cross_attn_layer(
                     model_layers, inputs_embeds, layer_idx,
-                    position_ids, attention_mask, batch_size, head_dim,
+                    position_ids, attention_mask, batch_size,
                     use_cache=use_cache, fill_kv_cache=fill_kv_cache,
                     past_key_values=past_key_values,
                 )
@@ -467,9 +487,7 @@ class Gemma4WithExpertModel(nn.Module):
                 final_embeds.append(None)
         return final_embeds, past_key_values
 
-    def _eager_attention(self, attention_mask, batch_size, head_dim, query_states, key_states, value_states):
-        num_heads = self.num_attention_heads
-        num_kv_heads = self.num_key_value_heads
+    def _eager_attention(self, attention_mask, batch_size, head_dim, num_heads, num_kv_heads, query_states, key_states, value_states):
         num_groups = num_heads // num_kv_heads
         seq_len = key_states.shape[1]
 
