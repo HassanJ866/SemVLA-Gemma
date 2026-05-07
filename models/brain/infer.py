@@ -12,6 +12,8 @@ Usage:
     task = brain.synthesize_task(image, src_name, src_bbox, dst_name, dst_bbox, src_graph)
 """
 
+import base64
+import io
 import json
 import logging
 
@@ -93,16 +95,30 @@ class BrainInference:
 
 def _call(self, messages: list[dict], image: Image.Image | None,
               schema: dict) -> dict:
-        # Gemma4 requires image and text to be processed together in one call
-        # so that image tokens in the text match the pixel_values tensor.
-        images = [image] if image is not None else None
+        # transformers 5.5.0: pass image as base64 inside the content entry.
+        # Inline PIL objects are not supported until post-5.5.0, and passing
+        # images= as a separate kwarg causes a duplicate-keyword error.
+        if image is not None:
+            buf = io.BytesIO()
+            image.save(buf, format="JPEG")
+            img_b64 = base64.b64encode(buf.getvalue()).decode("ascii")
+            resolved = []
+            for msg in messages:
+                new_content = []
+                for part in msg["content"]:
+                    if part["type"] == "image":
+                        new_content.append({"type": "image", "base64": img_b64})
+                    else:
+                        new_content.append(part)
+                resolved.append({"role": msg["role"], "content": new_content})
+        else:
+            resolved = messages
         enc = self.processor.apply_chat_template(
-            messages,
+            resolved,
             add_generation_prompt=True,
             tokenize=True,
             return_dict=True,
             return_tensors="pt",
-            images=images,
         )
         enc = {k: v.to(self.device) for k, v in enc.items()
                if isinstance(v, torch.Tensor)}

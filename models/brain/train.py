@@ -7,7 +7,9 @@ Usage:
 Resume from latest checkpoint automatically if one exists in output_dir.
 """
 
+import base64
 import csv
+import io
 import json
 import logging
 import os
@@ -24,6 +26,12 @@ from transformers import get_cosine_schedule_with_warmup
 from models.brain.prompts import format_training_sample
 
 log = logging.getLogger(__name__)
+
+
+def _pil_to_base64(img) -> str:
+    buf = io.BytesIO()
+    img.save(buf, format="JPEG")
+    return base64.b64encode(buf.getvalue()).decode("ascii")
 
 
 # ── dataset ────────────────────────────────────────────────────────────────────
@@ -71,16 +79,27 @@ def collate_fn(batch, processor, device, max_length: int = 1024):
     all_encodings = []
     for item in batch:
         img = item["image"] if item["image"] is not None else placeholder
-        full_messages = item["messages"] + [
+        # transformers 5.5.0: images must be passed as base64/url/path inside the
+        # content entry — inline PIL objects are not supported until post-5.5.0.
+        img_b64 = _pil_to_base64(img)
+        messages_with_image = []
+        for msg in item["messages"]:
+            new_content = []
+            for part in msg["content"]:
+                if part["type"] == "image":
+                    new_content.append({"type": "image", "base64": img_b64})
+                else:
+                    new_content.append(part)
+            messages_with_image.append({"role": msg["role"], "content": new_content})
+        messages_with_image.append(
             {"role": "assistant", "content": [{"type": "text", "text": item["target_text"]}]}
-        ]
+        )
         enc = processor.apply_chat_template(
-            full_messages,
+            messages_with_image,
             add_generation_prompt=False,
             tokenize=True,
             return_dict=True,
             return_tensors="pt",
-            images=[img],
             truncation=True,
             max_length=max_length,
         )
