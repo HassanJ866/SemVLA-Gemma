@@ -261,7 +261,7 @@ class Gemma4WithExpertModel(nn.Module):
 
     # ── Embedding helpers ────────────────────────────────────────────────────
 
-    def embed_image(self, image: torch.Tensor) -> torch.Tensor:
+    def embed_image(self, image: torch.Tensor, pixel_position_ids: torch.Tensor | None = None) -> torch.Tensor:
         """
         Run image through Gemma4 vision tower + multi-modal projector.
         Returns (B, num_patches, vlm_hidden_size).
@@ -287,7 +287,9 @@ class Gemma4WithExpertModel(nn.Module):
             do_normalize=False,
         )
         pixel_values = processor_inputs["pixel_values"]
-        pixel_position_ids = processor_inputs["image_position_ids"]
+        
+        if pixel_position_ids is None:
+            pixel_position_ids = processor_inputs["image_position_ids"]
 
         if pixel_values.ndim != 3:
             raise ValueError(

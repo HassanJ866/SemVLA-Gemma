@@ -129,25 +129,25 @@ class SemVLAPolicy(PreTrainedPolicy):
         for k in batch:
             if k in self._queues and k != ACTION:
                 batch[k] = torch.stack(list(self._queues[k]), dim=1)
-        images, img_masks = self.prepare_images(batch)
+        images, img_masks, img_position_ids = self.prepare_images(batch)
         state = self.prepare_state(batch)
         lang_tokens = batch[OBS_LANGUAGE_TOKENS]
         lang_masks = batch[OBS_LANGUAGE_ATTENTION_MASK]
-        actions = self.model.sample_actions(images, img_masks, lang_tokens, lang_masks, state, noise=noise)
+        actions = self.model.sample_actions(images, img_masks, img_position_ids, lang_tokens, lang_masks, state, noise=noise)
         original_action_dim = self.config.action_feature.shape[0]
         return actions[:, :, :original_action_dim]
 
     # ── Training ──────────────────────────────────────────────────────────────
 
     def forward(self, batch: dict[str, Tensor], noise=None, time=None, reduction="mean"):
-        images, img_masks = self.prepare_images(batch)
+        images, img_masks, img_position_ids = self.prepare_images(batch)
         state = self.prepare_state(batch)
         lang_tokens = batch[OBS_LANGUAGE_TOKENS]
         lang_masks = batch[OBS_LANGUAGE_ATTENTION_MASK]
         actions = self.prepare_action(batch)
         actions_is_pad = batch.get("action_is_pad")
 
-        losses = self.model.forward(images, img_masks, lang_tokens, lang_masks, state, actions, noise, time)
+        losses = self.model.forward(images, img_masks, img_position_ids, lang_tokens, lang_masks, state, actions, noise, time)
         original_action_dim = self.config.action_feature.shape[0]
         losses = losses[:, :, :original_action_dim]
 
@@ -180,7 +180,7 @@ class SemVLAPolicy(PreTrainedPolicy):
     # ── Preprocessing helpers ─────────────────────────────────────────────────
 
     def prepare_images(self, batch):
-        images, img_masks = [], []
+        images, img_masks, img_position_ids = [], [], []
         present = [k for k in self.config.image_features if k in batch]
         missing = [k for k in self.config.image_features if k not in batch]
         if not present:
@@ -193,12 +193,22 @@ class SemVLAPolicy(PreTrainedPolicy):
             bsize = img.shape[0]
             mask = (batch[f"{key}_padding_mask"].bool() if f"{key}_padding_mask" in batch
                     else torch.ones(bsize, dtype=torch.bool, device=img.device))
+            
+            pos_ids = batch.get(f"{key}_position_ids")
+            if pos_ids is None and key == "observation.image":
+                pos_ids = batch.get("image_position_ids")
+            if pos_ids is not None:
+                pos_ids = pos_ids[:, -1] if pos_ids.ndim == 4 else pos_ids
+                
             images.append(img)
             img_masks.append(mask)
+            img_position_ids.append(pos_ids)
+            
         for i in range(min(len(missing), self.config.empty_cameras)):
             images.append(torch.ones_like(images[-1]) * -1)
             img_masks.append(torch.zeros_like(img_masks[-1]))
-        return images, img_masks
+            img_position_ids.append(None)
+        return images, img_masks, img_position_ids
 
     def prepare_state(self, batch):
         state = batch[OBS_STATE][:, -1] if batch[OBS_STATE].ndim > 2 else batch[OBS_STATE]
@@ -260,11 +270,11 @@ class SemVLAFlowMatching(nn.Module):
 
     # ── Embedding ─────────────────────────────────────────────────────────────
 
-    def embed_prefix(self, images, img_masks, lang_tokens, lang_masks, state):
+    def embed_prefix(self, images, img_masks, img_position_ids, lang_tokens, lang_masks, state):
         embs, pad_masks, att_masks = [], [], []
 
-        for img, img_mask in zip(images, img_masks):
-            img_emb = self.gemma4_with_expert.embed_image(img)
+        for img, img_mask, img_pos_id in zip(images, img_masks, img_position_ids):
+            img_emb = self.gemma4_with_expert.embed_image(img, pixel_position_ids=img_pos_id)
             # Normalize by sqrt(d) — same as SmolVLA
             img_emb = img_emb * (img_emb.shape[-1] ** 0.5)
             bsize, n_patches = img_emb.shape[:2]
@@ -319,7 +329,7 @@ class SemVLAFlowMatching(nn.Module):
 
     # ── Training forward ──────────────────────────────────────────────────────
 
-    def forward(self, images, img_masks, lang_tokens, lang_masks, state, actions, noise=None, time=None):
+    def forward(self, images, img_masks, img_position_ids, lang_tokens, lang_masks, state, actions, noise=None, time=None):
         if noise is None:
             noise = self.sample_noise(actions.shape, actions.device)
         if time is None:
@@ -330,7 +340,7 @@ class SemVLAFlowMatching(nn.Module):
         u_t = noise - actions
 
         prefix_embs, prefix_pad, prefix_att = self.embed_prefix(
-            images, img_masks, lang_tokens, lang_masks, state
+            images, img_masks, img_position_ids, lang_tokens, lang_masks, state
         )
         suffix_embs, suffix_pad, suffix_att = self.embed_suffix(x_t, time)
 
@@ -353,13 +363,13 @@ class SemVLAFlowMatching(nn.Module):
 
     # ── Inference ─────────────────────────────────────────────────────────────
 
-    def sample_actions(self, images, img_masks, lang_tokens, lang_masks, state, noise=None):
+    def sample_actions(self, images, img_masks, img_position_ids, lang_tokens, lang_masks, state, noise=None):
         bsize, device = state.shape[0], state.device
         if noise is None:
             noise = self.sample_noise((bsize, self.config.chunk_size, self.config.max_action_dim), device)
 
         prefix_embs, prefix_pad, prefix_att = self.embed_prefix(
-            images, img_masks, lang_tokens, lang_masks, state
+            images, img_masks, img_position_ids, lang_tokens, lang_masks, state
         )
         prefix_att_2d = make_att_2d_masks(prefix_pad, prefix_att)
         prefix_pos = torch.cumsum(prefix_pad, dim=1) - 1
