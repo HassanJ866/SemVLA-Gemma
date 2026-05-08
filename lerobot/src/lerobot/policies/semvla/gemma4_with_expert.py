@@ -266,9 +266,55 @@ class Gemma4WithExpertModel(nn.Module):
         Run image through Gemma4 vision tower + multi-modal projector.
         Returns (B, num_patches, vlm_hidden_size).
         """
+        if image.ndim != 4:
+            raise ValueError(f"Expected image tensor of shape (B, C, H, W), got {tuple(image.shape)}")
+
+        # Gemma4 vision tower expects patchified pixel_values + pixel_position_ids.
+        # Our policy path prepares images in [-1, 1], so convert back to [0, 1]
+        # before handing off to Gemma4's image processor for patchification.
+        image_for_processor = image
+        if image_for_processor.dtype != torch.float32:
+            image_for_processor = image_for_processor.float()
+        if torch.min(image_for_processor).item() < 0:
+            image_for_processor = (image_for_processor + 1.0) / 2.0
+        image_for_processor = image_for_processor.clamp(0.0, 1.0)
+
+        processor_inputs = self.processor.image_processor(
+            images=[img for img in image_for_processor],
+            return_tensors="pt",
+            do_resize=False,
+            do_rescale=False,
+            do_normalize=False,
+        )
+        pixel_values = processor_inputs["pixel_values"]
+        pixel_position_ids = processor_inputs["image_position_ids"]
+
+        if pixel_values.ndim != 3:
+            raise ValueError(
+                f"Expected patchified pixel_values with shape (B, N, patch_dim), got {tuple(pixel_values.shape)}"
+            )
+        if pixel_position_ids.ndim != 3 or pixel_position_ids.shape[-1] != 2:
+            raise ValueError(
+                "Expected image_position_ids with shape (B, N, 2), "
+                f"got {tuple(pixel_position_ids.shape)}"
+            )
+        if pixel_values.shape[:2] != pixel_position_ids.shape[:2]:
+            raise ValueError(
+                "Mismatch between pixel_values and image_position_ids token dims: "
+                f"{tuple(pixel_values.shape[:2])} vs {tuple(pixel_position_ids.shape[:2])}"
+            )
+
+        expected_patch_dim = 3 * (self._vision_model.config.patch_size ** 2)
+        if pixel_values.shape[-1] != expected_patch_dim:
+            raise ValueError(
+                f"Unexpected patch dim {pixel_values.shape[-1]} (expected {expected_patch_dim}). "
+                "Check image preprocessing/patchification."
+            )
+
+        vision_dtype = self._vision_model.dtype if hasattr(self._vision_model, "dtype") else pixel_values.dtype
         vision_out = self._vision_model(
-            pixel_values=image.to(dtype=self._vision_model.dtype
-                                  if hasattr(self._vision_model, "dtype") else image.dtype),
+            pixel_values=pixel_values.to(device=image.device, dtype=vision_dtype),
+            pixel_position_ids=pixel_position_ids.to(device=image.device, dtype=torch.long),
         )
         # last_hidden_state shape: (B, num_patches, vision_hidden)
         image_features = vision_out.last_hidden_state
