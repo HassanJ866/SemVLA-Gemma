@@ -227,6 +227,9 @@ class Gemma4WithExpertModel(nn.Module):
             "model.multi_modal_projector",
             "model.connector",
             "multi_modal_projector",
+            "vision_model.multi_modal_projector",
+            "model.vision_model.multi_modal_projector",
+            "vision_tower.multi_modal_projector",
         ]:
             obj = self.vlm
             try:
@@ -235,7 +238,16 @@ class Gemma4WithExpertModel(nn.Module):
                 return obj
             except AttributeError:
                 continue
-        return None
+                
+        # If standard paths fail, try to find it dynamically
+        for name, module in self.vlm.named_modules():
+            if "projector" in name.lower() or "connector" in name.lower():
+                return module
+                
+        raise RuntimeError(
+            f"Cannot locate the multi-modal projector inside the Gemma4 model. "
+            f"Available top-level modules: {list(dict(self.vlm.named_children()).keys())}"
+        )
 
     # ── Gradient / training mode ─────────────────────────────────────────────
 
