@@ -241,12 +241,16 @@ class Gemma4WithExpertModel(nn.Module):
                 
         # If standard paths fail, try to find it dynamically
         for name, module in self.vlm.named_modules():
-            if "projector" in name.lower() or "connector" in name.lower():
-                return module
+            if "projector" in name.lower() or "connector" in name.lower() or "projector" in module.__class__.__name__.lower() or "connector" in module.__class__.__name__.lower():
+                # Avoid returning the top level model or purely container modules if possible
+                if len(list(module.children())) == 0 or isinstance(module, torch.nn.Sequential) or "linear" in module.__class__.__name__.lower() or "mlp" in module.__class__.__name__.lower() or "projector" in module.__class__.__name__.lower():
+                    return module
                 
+        # Collect all module names to print in the error message for debugging
+        all_modules = [name for name, _ in self.vlm.named_modules()]
         raise RuntimeError(
             f"Cannot locate the multi-modal projector inside the Gemma4 model. "
-            f"Available top-level modules: {list(dict(self.vlm.named_children()).keys())}"
+            f"Available modules: {all_modules}"
         )
 
     # ── Gradient / training mode ─────────────────────────────────────────────
