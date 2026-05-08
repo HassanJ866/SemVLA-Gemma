@@ -46,6 +46,11 @@ echo "========================================================"
 echo "[$(date +'%H:%M:%S')] Starting SemVLA action-head training ..."
 echo "========================================================"
 
+# Force HF to load the local dataset and stop phoning home for updates.
+# This completely bypasses the login requirement and the 401 error!
+export HF_TOKEN=""
+export HF_HUB_OFFLINE=1
+
 lerobot-train \
     --policy.type=semvla \
     --policy.brain_model_path="$MERGED" \
