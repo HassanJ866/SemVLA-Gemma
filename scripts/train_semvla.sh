@@ -46,7 +46,11 @@ echo "========================================================"
 echo "[$(date +'%H:%M:%S')] Starting SemVLA action-head training ..."
 echo "========================================================"
 
-lerobot-train \
+# Use EGL for headless rendering on the SLURM node
+export MUJOCO_GL="egl"
+
+# Pipe 'y' to automatically answer the Libero dataset setup prompt
+echo "y" | lerobot-train \
     --policy.type=semvla \
     --policy.brain_model_path="$MERGED" \
     --policy.device=cuda \
