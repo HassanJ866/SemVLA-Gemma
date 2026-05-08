@@ -14,7 +14,7 @@ module purge
 module load miniforge/24.3.0-0
 
 source "$(conda info --base)/etc/profile.d/conda.sh"
-conda activate vla_bench
+conda activate vla_bench_py312
 
 cd ~/SemVLA-Gemma
 
