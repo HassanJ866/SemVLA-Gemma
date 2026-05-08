@@ -49,25 +49,12 @@ echo "========================================================"
 # Use EGL for headless rendering on the SLURM node
 export MUJOCO_GL="egl"
 
-# Pre-configure LIBERO to avoid interactive prompts in headless mode
-mkdir -p ~/.libero
-cat > ~/.libero/config.yaml << 'EOF'
-benchmark_root: ~/.cache/libero/benchmark
-bddl_files: ~/.cache/libero/bddl_files
-init_states: ~/.cache/libero/init_files
-datasets: ~/.cache/libero/datasets
-assets: ~/.cache/libero/assets
-EOF
-
-# Pipe all answers to LIBERO setup prompts (y, dataset path, y)
-(echo "y"; echo "$HOME/.cache/libero/datasets"; echo "y") | lerobot-train \
+lerobot-train \
     --policy.type=semvla \
     --policy.brain_model_path="$MERGED" \
     --policy.device=cuda \
     --policy.push_to_hub=false \
     --dataset.repo_id=HuggingFaceVLA/libero \
-    --env.type=libero \
-    --env.task=libero_spatial \
     --batch_size=16 \
     --steps=50000 \
     --save_freq=100 \
