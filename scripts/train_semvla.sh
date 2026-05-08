@@ -31,9 +31,20 @@ if [ ! -d "$MERGED" ]; then
     python scripts/merge_brain.py \
         --adapter ckpts/brain_phase1/checkpoint-1500 \
         --output  "$MERGED"
+    if [ $? -ne 0 ]; then
+        echo "ERROR: Brain merge failed!"
+        exit 1
+    fi
 else
     echo "[$(date +'%H:%M:%S')] Merged model already exists, skipping merge."
 fi
+
+# Verify merged model exists
+if [ ! -d "$MERGED" ]; then
+    echo "ERROR: Merged model directory does not exist at $MERGED"
+    exit 1
+fi
+echo "✓ Using brain from: $MERGED"
 
 # ── 2. Install lerobot (fast — skips if already installed) ───────────────────
 echo "========================================================"
