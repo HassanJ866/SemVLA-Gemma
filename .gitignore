@@ -2,3 +2,6 @@
 *.hdf5
 AGENTS.md
 /ckpts/
+*.pyc
+*.cpython-312.pyc
+lerobot/src/lerobot/policies/semvla/__pycache__/gemma4_with_expert.cpython-312.pyc

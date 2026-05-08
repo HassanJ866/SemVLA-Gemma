@@ -318,12 +318,21 @@ class Gemma4WithExpertModel(nn.Module):
             pixel_values=pixel_values.to(device=image.device, dtype=vision_dtype),
             pixel_position_ids=pixel_position_ids.to(device=image.device, dtype=torch.long),
         )
-        # last_hidden_state shape: (B, num_patches, vision_hidden)
+        # last_hidden_state shape: (B_out, num_patches, vision_hidden)
         image_features = vision_out.last_hidden_state
 
         projector = self._get_multimodal_projector()
         if projector is not None:
             image_features = projector(image_features)
+
+        B = image.shape[0]
+        B_out, N, D = image_features.shape
+        if B_out != B:
+            if B_out % B == 0:
+                num_crops = B_out // B
+                image_features = image_features.view(B, num_crops * N, D)
+            else:
+                raise ValueError(f"Output batch size {B_out} is not divisible by input batch size {B}")
 
         return image_features
 
