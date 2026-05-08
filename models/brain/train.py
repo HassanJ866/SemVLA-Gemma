@@ -250,6 +250,17 @@ def main(cfg: DictConfig):
 
     # ── training ───────────────────────────────────────────────────────────
     FastVisionModel.for_training(model)
+    model.to(device)
+
+    def batch_to_device(batch, device):
+        if isinstance(batch, torch.Tensor):
+            return batch.to(device)
+        if isinstance(batch, dict):
+            return {k: batch_to_device(v, device) for k, v in batch.items()}
+        if isinstance(batch, (list, tuple)):
+            return type(batch)(batch_to_device(v, device) for v in batch)
+        return batch
+
     global_step = start_step
     grad_accum  = cfg.get("grad_accum_steps", 1)
     optimizer.zero_grad()
@@ -269,8 +280,7 @@ def main(cfg: DictConfig):
                 continue
 
             task_types = batch.pop("task_types")
-            batch = {k: v.to(device) if isinstance(v, torch.Tensor) else v
-                     for k, v in batch.items()}
+            batch = batch_to_device(batch, device)
             outputs = model(**batch)
             loss    = outputs.loss / grad_accum
             loss.backward()
