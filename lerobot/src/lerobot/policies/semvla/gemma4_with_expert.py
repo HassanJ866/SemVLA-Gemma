@@ -89,7 +89,7 @@ class Gemma4WithExpertModel(nn.Module):
             )
         else:
             from transformers import AutoModelForImageTextToText
-            cfg = AutoConfig.from_pretrained(brain_model_path, trust_remote_code=True)
+            cfg = AutoConfig.from_pretrained(brain_model_path, trust_remote_code=True, local_files_only=True)
             self.vlm = AutoModelForImageTextToText.from_config(cfg)
 
         self.processor = AutoProcessor.from_pretrained(brain_model_path, trust_remote_code=True)
