@@ -326,13 +326,43 @@ class Gemma4WithExpertModel(nn.Module):
             image_features = projector(image_features)
 
         B = image.shape[0]
-        B_out, N, D = image_features.shape
-        if B_out != B:
-            if B_out % B == 0:
-                num_crops = B_out // B
-                image_features = image_features.view(B, num_crops * N, D)
+        
+        if image_features.ndim == 2:
+            # Output is (B_out * N, D) or something similar.
+            # Gemma 4 projector might flatten the sequence.
+            # We assume B_out = B * num_crops, so the first dim is total patches.
+            total_patches, D = image_features.shape
+            
+            # We need to figure out B_out and N.
+            # But the vision model input `pixel_values` has shape (B_out, N, patch_dim)
+            B_out = pixel_values.shape[0]
+            N = pixel_values.shape[1]
+            
+            if total_patches == B_out * N:
+                pass # Expected
             else:
-                raise ValueError(f"Output batch size {B_out} is not divisible by input batch size {B}")
+                # If the projector changed N (unlikely, but possible), just infer it.
+                N = total_patches // B_out
+                
+            if B_out != B:
+                if B_out % B == 0:
+                    num_crops = B_out // B
+                    image_features = image_features.reshape(B, num_crops * N, D)
+                else:
+                    raise ValueError(f"Output batch size {B_out} is not divisible by input batch size {B}")
+            else:
+                image_features = image_features.reshape(B, N, D)
+
+        elif image_features.ndim == 3:
+            B_out, N, D = image_features.shape
+            if B_out != B:
+                if B_out % B == 0:
+                    num_crops = B_out // B
+                    image_features = image_features.reshape(B, num_crops * N, D)
+                else:
+                    raise ValueError(f"Output batch size {B_out} is not divisible by input batch size {B}")
+        else:
+            raise ValueError(f"Unexpected image_features shape: {tuple(image_features.shape)}")
 
         return image_features
 
