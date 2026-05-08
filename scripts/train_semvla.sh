@@ -7,8 +7,8 @@
 #SBATCH --time=0-23:59:00
 #SBATCH --mail-type=ALL
 #SBATCH --mail-user=s338920@studenti.polito.it
-#SBATCH --output=logs/slurm_%j.out
-#SBATCH --error=logs/slurm_%j.err
+#SBATCH --output=logs/slurm_%j_train_semvla.out
+#SBATCH --error=logs/slurm_%j_train_semvla.err
 
 module purge
 module load miniforge/24.3.0-0
@@ -50,6 +50,7 @@ lerobot-train \
     --policy.type=semvla \
     --policy.brain_model_path="$MERGED" \
     --policy.device=cuda \
+    --policy.push_to_hub=false \
     --dataset.repo_id=lerobot/libero_spatial \
     --batch_size=16 \
     --steps=50000 \
