@@ -89,7 +89,16 @@ class Gemma4WithExpertModel(nn.Module):
             )
         else:
             from transformers import AutoModelForImageTextToText
-            cfg = AutoConfig.from_pretrained(brain_model_path, trust_remote_code=True, local_files_only=True)
+            # If this is a LoRA adapter dir, get base model path from adapter_config.json
+            import os, json
+            adapter_cfg_path = os.path.join(brain_model_path, "adapter_config.json")
+            if os.path.exists(adapter_cfg_path):
+                with open(adapter_cfg_path) as f:
+                    adapter_cfg = json.load(f)
+                base_path = adapter_cfg["base_model_name_or_path"]
+            else:
+                base_path = brain_model_path
+            cfg = AutoConfig.from_pretrained(base_path, trust_remote_code=True)
             self.vlm = AutoModelForImageTextToText.from_config(cfg)
 
         self.processor = AutoProcessor.from_pretrained(brain_model_path, trust_remote_code=True)
