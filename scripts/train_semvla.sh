@@ -10,6 +10,8 @@
 #SBATCH --output=logs/slurm_%j_train_semvla.out
 #SBATCH --error=logs/slurm_%j_train_semvla.err
 
+set -euo pipefail
+
 module purge
 module load miniforge/24.3.0-0
 
@@ -21,6 +23,10 @@ cd ~/SemVLA-Gemma
 mkdir -p logs
 
 PROJECT_DIR="$HOME/SemVLA-Gemma"
+if [ -z "${ADAPTER_CKPT:-}" ]; then
+    ADAPTER_CKPT="$(ls -d "$PROJECT_DIR"/ckpts/brain_phase1/checkpoint-* 2>/dev/null | sort -V | tail -n 1 || true)"
+fi
+ADAPTER_CKPT="${ADAPTER_CKPT:-$PROJECT_DIR/ckpts/brain_phase1/checkpoint-1500}"
 
 # ── 1. Merge LoRA brain (skip if already done) ────────────────────────────────
 MERGED="$PROJECT_DIR/ckpts/brain_phase1/final"
@@ -29,7 +35,7 @@ if [ ! -d "$MERGED" ]; then
     echo "[$(date +'%H:%M:%S')] Merging LoRA adapter ..."
     echo "========================================================"
     python scripts/merge_brain.py \
-        --adapter ckpts/brain_phase1/checkpoint-1500 \
+        --adapter "$ADAPTER_CKPT" \
         --output  "$MERGED"
     if [ $? -ne 0 ]; then
         echo "ERROR: Brain merge failed!"
@@ -50,7 +56,12 @@ echo "✓ Using brain from: $MERGED"
 echo "========================================================"
 echo "[$(date +'%H:%M:%S')] Installing lerobot extras ..."
 echo "========================================================"
-pip install -q -e "lerobot/[smolvla,libero,training]"
+pip install -e "lerobot/[smolvla,libero,training]"
+
+if ! command -v lerobot-train >/dev/null 2>&1; then
+    echo "ERROR: lerobot-train command not found after install."
+    exit 1
+fi
 
 # ── 3. Train action head ──────────────────────────────────────────────────────
 echo "========================================================"
