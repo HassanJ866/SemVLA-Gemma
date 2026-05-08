@@ -224,14 +224,11 @@ class Gemma4WithExpertModel(nn.Module):
     def _get_multimodal_projector(self):
         """Return the vision→text projection module."""
         for attr_path in [
+            "model.language_model.multi_modal_projector", # Most likely based on your logs
             "model.multi_modal_projector",
+            "language_model.multi_modal_projector",
             "model.connector",
             "multi_modal_projector",
-            "vision_model.multi_modal_projector",
-            "model.vision_model.multi_modal_projector",
-            "vision_tower.multi_modal_projector",
-            "model.embed_video",
-            "embed_video",
         ]:
             obj = self.vlm
             try:
@@ -241,20 +238,15 @@ class Gemma4WithExpertModel(nn.Module):
             except AttributeError:
                 continue
                 
-        # If standard paths fail, try to find it dynamically
+        # If explicit paths fail, search the module tree for the first linear/mlp bridge
         for name, module in self.vlm.named_modules():
-            if "projector" in name.lower() or "connector" in name.lower() or "embed_video" in name.lower() or "projector" in module.__class__.__name__.lower() or "connector" in module.__class__.__name__.lower():
-                # Avoid returning the top level model or purely container modules if possible
-                if len(list(module.children())) == 0 or isinstance(module, torch.nn.Sequential) or "linear" in module.__class__.__name__.lower() or "mlp" in module.__class__.__name__.lower() or "projector" in module.__class__.__name__.lower():
-                    return module
+            if "projector" in name.lower() or "adapter" in name.lower():
+                return module
                 
-        # Collect all module names to print in the error message for debugging
-        all_modules = [name for name, _ in self.vlm.named_modules()]
         raise RuntimeError(
-            f"Cannot locate the multi-modal projector inside the Gemma4 model. "
-            f"Available modules: {all_modules}"
+            f"Could not find projector. Please check if your model uses a projector "
+            f"or if vision features already match the text dim (2048)."
         )
-
     # ── Gradient / training mode ─────────────────────────────────────────────
 
     def set_requires_grad(self):
