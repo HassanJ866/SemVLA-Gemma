@@ -230,6 +230,8 @@ class Gemma4WithExpertModel(nn.Module):
             "vision_model.multi_modal_projector",
             "model.vision_model.multi_modal_projector",
             "vision_tower.multi_modal_projector",
+            "model.embed_video",
+            "embed_video",
         ]:
             obj = self.vlm
             try:
@@ -241,7 +243,7 @@ class Gemma4WithExpertModel(nn.Module):
                 
         # If standard paths fail, try to find it dynamically
         for name, module in self.vlm.named_modules():
-            if "projector" in name.lower() or "connector" in name.lower() or "projector" in module.__class__.__name__.lower() or "connector" in module.__class__.__name__.lower():
+            if "projector" in name.lower() or "connector" in name.lower() or "embed_video" in name.lower() or "projector" in module.__class__.__name__.lower() or "connector" in module.__class__.__name__.lower():
                 # Avoid returning the top level model or purely container modules if possible
                 if len(list(module.children())) == 0 or isinstance(module, torch.nn.Sequential) or "linear" in module.__class__.__name__.lower() or "mlp" in module.__class__.__name__.lower() or "projector" in module.__class__.__name__.lower():
                     return module
