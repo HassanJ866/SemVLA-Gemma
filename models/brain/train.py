@@ -106,6 +106,15 @@ def save_checkpoint(model, processor, optimizer, scheduler, step: int,
         shutil.rmtree(old)
         log.info(f"Removed old checkpoint: {old}")
 
+def batch_to_device(batch, device):
+    if hasattr(batch, "to") and callable(batch.to):
+        return batch.to(device)
+    if isinstance(batch, dict) or hasattr(batch, "items"):
+        return {k: batch_to_device(v, device) for k, v in batch.items()}
+    if isinstance(batch, (list, tuple)):
+        return type(batch)(batch_to_device(v, device) for v in batch)
+    return batch
+
 
 # ── evaluation ─────────────────────────────────────────────────────────────────
 
@@ -117,6 +126,7 @@ def evaluate(model, val_loader, device) -> dict:
     with torch.no_grad():
         for batch in val_loader:
             task_types = batch.pop("task_types")
+            batch = batch_to_device(batch, device)
             outputs = model(**batch)
             loss_val = outputs.loss.item()
             total_loss += loss_val
@@ -251,15 +261,6 @@ def main(cfg: DictConfig):
     # ── training ───────────────────────────────────────────────────────────
     FastVisionModel.for_training(model)
     model.to(device)
-
-    def batch_to_device(batch, device):
-        if isinstance(batch, torch.Tensor):
-            return batch.to(device)
-        if isinstance(batch, dict):
-            return {k: batch_to_device(v, device) for k, v in batch.items()}
-        if isinstance(batch, (list, tuple)):
-            return type(batch)(batch_to_device(v, device) for v in batch)
-        return batch
 
     global_step = start_step
     grad_accum  = cfg.get("grad_accum_steps", 1)
