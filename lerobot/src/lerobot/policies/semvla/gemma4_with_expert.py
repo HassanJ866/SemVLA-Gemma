@@ -222,11 +222,9 @@ class Gemma4WithExpertModel(nn.Module):
         raise RuntimeError("Cannot locate the vision encoder inside the Gemma4 model.")
 
     def _get_multimodal_projector(self):
-        """Return the vision→text projection module."""
+        """Return the vision to text projection module or None if projector-less."""
         for attr_path in [
-            "model.language_model.multi_modal_projector", # Most likely based on your logs
             "model.multi_modal_projector",
-            "language_model.multi_modal_projector",
             "model.connector",
             "multi_modal_projector",
         ]:
@@ -238,15 +236,12 @@ class Gemma4WithExpertModel(nn.Module):
             except AttributeError:
                 continue
                 
-        # If explicit paths fail, search the module tree for the first linear/mlp bridge
         for name, module in self.vlm.named_modules():
-            if "projector" in name.lower() or "adapter" in name.lower():
+            if "projector" in name.lower() or "connector" in name.lower():
                 return module
                 
-        raise RuntimeError(
-            f"Could not find projector. Please check if your model uses a projector "
-            f"or if vision features already match the text dim (2048)."
-        )
+        return None
+
     # ── Gradient / training mode ─────────────────────────────────────────────
 
     def set_requires_grad(self):
